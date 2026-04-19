@@ -228,14 +228,34 @@ def setup_gui():
         y = file_btn.winfo_rooty() + file_btn.winfo_height()
         file_context_menu.post(x, y)
         root.bind("<Button-1>", lambda e: file_context_menu.unpost())
+        root.bind("<Configure>", lambda e: file_context_menu.unpost())
         
     def show_edit_menu():
         x = edit_btn.winfo_rootx()
         y = edit_btn.winfo_rooty() + edit_btn.winfo_height()
         key_menu.post(x, y)  
         root.bind("<Button-1>", lambda e: key_menu.unpost())
+        root.bind("<Configure>", lambda e: key_menu.unpost())
 
         
+    def toggle_record():
+        if not recorder.is_recording:
+            recorder.start_recording()
+            record_btn.config(text="⏹ Stop Rec", bg="#7f0000")
+            
+        else:
+            recorder.stop_recording()
+            record_btn.config(text="⏺ Record", bg="#c0392b")
+            
+    def toggle_play():
+        if not recorder.is_playing:
+            t = threading.Thread(target=recorder.play_recording)
+            t.daemon = True
+            t.start()
+            play_btn.config(text="⏹ Stop", bg="#c0392b")
+        else:
+            recorder.is_playing = False
+            play_btn.config(text="▶ Play", bg="#27ae60")
     
     file_context_menu = tk.Menu(root, tearoff=0, bg="#252526", fg="white", activebackground="#3e3e42", bd=0)
     file_context_menu.add_command(label="Save", command=save)
@@ -261,9 +281,6 @@ def setup_gui():
     edit_btn = tk.Button(top_bar, text="Edit", command=show_edit_menu, **btn_style)
     edit_btn.pack(side="left", padx=5, pady=5)
     
-    top_bar = tk.Frame(root, bg="#252526", height=35)
-    top_bar.pack(side="top", fill="x")
-
     btn_style = {
         "bg": "#252526",
         "fg": "white",
@@ -273,6 +290,19 @@ def setup_gui():
     }
 
 
+    is_loop = tk.BooleanVar (value=False)
+    control_bar = tk.Frame(root, bg="#1e1e1e")
+    control_bar.pack(side="top", fill="x", padx=10, pady=5)
+    
+    record_btn = tk.Button(control_bar, text="⏺ Record", bg="#c0392b", fg="white", relief="flat", font=("Segoe UI", 9), activebackground="#2ecc71", command=lambda: toggle_record())
+    record_btn.pack(side="left", padx=5)
+    
+    play_btn = tk.Button(control_bar, text="▶ Play", bg="#27ae60", fg="white", relief="flat", font=("Segoe UI", 9), activebackground="#2ecc71", command=lambda: toggle_play())
+    play_btn.pack(side="left", padx=5)
+    
+    loop_check = tk.Checkbutton(control_bar, text="Loop", variable=is_loop, bg="#1e1e1e", fg="white", selectcolor="#1e1e1e", activebackground="#1e1e1e", activeforeground="white", font=("Segoe UI", 9))
+    loop_check.pack(side="left", padx=5)
+        
     root.mainloop()
 
 if __name__ == "__main__":
