@@ -38,7 +38,10 @@ class Nahida4479Recorder:
         self.is_recording = False
         self.start_time = 0
         self.used_keys = {}
-
+        self.on_play_finished = None
+        self.show_toast = None
+        self.last_action_time = 0
+        self.cooldown = 3
         self.mouse_controller = mouse.Controller()
         self.kb_controller = keyboard.Controller()
         self.hotkey_start_play = keyboard.Key.f4
@@ -56,22 +59,40 @@ class Nahida4479Recorder:
             self.recorded_events.append((event_type, data, timestamp))
 
     def start_recording(self):
+        if time.time() - self.last_action_time < self.cooldown:
+            print("Cooldown")
+            return
+        self.last_action_time = time.time()
         self.recorded_events = []
         self.start_time = time.time()
         self.is_recording = True
         print(emoji.emojize("REC START :red_circle:"))
-        messagebox.showinfo("Recorder", "Recording started!")
+        if self.show_toast:
+            self.show_toast("⏺ Recording started!", "#c0392b")
 
     def stop_recording(self):
+        if time.time() - self.last_action_time < self.cooldown:
+            print("Cooldown")
+            return
+        self.last_action_time = time.time()
         self.is_recording = False
         print("REC STOP")
-        messagebox.showinfo(
-            "Recorder", f"Recording stopped. Saved {len(self.recorded_events)} :)"
-        )
+        if self.show_toast:
+            self.show_toast(f"⏹ Saved {len(self.recorded_events)} events", "#7f0000")
+            
 
     def play_recording(self):
+        if time.time() - self.last_action_time < self.cooldown:
+            remaining = round(self.cooldown - (time.time() - self.last_action_time), 1)
+            if self.show_toast:
+                self.show_toast(f"⏳ Cooldown: {remaining}s", "#555555")
+            return
+        self.last_action_time = time.time()
+        
         if not self.recorded_events:
             print("ERROR: You didn't record the script :(")
+            if self.on_play_finished:
+                self.on_play_finished()
             return
         print("PLAY START in 2 seconds")
 
@@ -80,8 +101,8 @@ class Nahida4479Recorder:
 
         last_time = 0
         for i, (event_type, data, timestamp) in enumerate(self.recorded_events):
-            if not self.is_playing:
-                break
+                if not self.is_playing:
+                    break
 
         print(f"Step {i+1}/{len(self.recorded_events)}: {event_type}")
 
@@ -103,7 +124,10 @@ class Nahida4479Recorder:
 
         self.is_playing = False
         print("PLAY FINISHED")
-        messagebox.showinfo("Recorder", "Playback finished!")
+        if self.on_play_finished:
+            self.on_play_finished()
+        if self.show_toast:
+            self.show_toast("▶ Playback finished!", "#27ae60")
 
 
 def on_click(x, y, button, pressed):
@@ -125,9 +149,9 @@ def on_press(key):
             if not recorder.is_recording:
                 recorder.start_recording()
                 return
-            if key == recorder.hotkey_stop_rec:
-                if recorder.is_recording:
-                    recorder.stop_recording()
+        if key == recorder.hotkey_stop_rec:
+            if recorder.is_recording:
+                recorder.stop_recording()
             return
         if key == recorder.hotkey_start_play:
             if not recorder.is_playing:
@@ -136,7 +160,7 @@ def on_press(key):
                 t.start()
                 return
         if key == recorder.hotkey_stop_play:
-            recorder.id_playing = False
+            recorder.is_playing = False
             return
         if recorder.is_recording:
             recorder.add_event("key", key)
@@ -241,17 +265,25 @@ def setup_gui():
     def toggle_record():
         if not recorder.is_recording:
             recorder.start_recording()
-            record_btn.config(text="⏹ Stop Rec", bg="#7f0000")
-            
+            if recorder.is_recording:
+                record_btn.config(text="⏹ Stop Rec", bg="#7f0000")
         else:
             recorder.stop_recording()
-            record_btn.config(text="⏺ Record", bg="#c0392b")
+            if not recorder.is_recording:
+                record_btn.config(text="⏺ Record", bg="#c0392b")
             
     def toggle_play():
         if not recorder.is_playing:
+            def on_finished():
+                play_btn.config(text="▶ Play", bg="#27ae60")
+            recorder.on_play_finished = on_finished
             t = threading.Thread(target=recorder.play_recording)
             t.daemon = True
             t.start()
+            root.after(100, lambda: play_btn.config(
+            text="⏹ Stop" if recorder.is_playing else "▶ Play",
+            bg="#c0392b" if recorder.is_playing else "#27ae60"   
+            ))
             play_btn.config(text="⏹ Stop", bg="#c0392b")
         else:
             recorder.is_playing = False
@@ -302,7 +334,17 @@ def setup_gui():
     
     loop_check = tk.Checkbutton(control_bar, text="Loop", variable=is_loop, bg="#1e1e1e", fg="white", selectcolor="#1e1e1e", activebackground="#1e1e1e", activeforeground="white", font=("Segoe UI", 9))
     loop_check.pack(side="left", padx=5)
-        
+    
+    toast_label = tk.Label(root, text="", bg="#27ae60", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=8)
+    
+    def show_toast(message, color="#27ae60"):
+        def _update():
+            
+            toast_label.config(text=message, bg=color)
+            toast_label.place(relx=0.5, rely=0.95, anchor="center")
+            root.after(2000, lambda: toast_label.place_forget())        
+        root.after(0, _update)
+    recorder.show_toast = show_toast
     root.mainloop()
 
 if __name__ == "__main__":
