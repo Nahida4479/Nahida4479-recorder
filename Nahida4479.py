@@ -7,6 +7,7 @@ import json
 from tkinter import filedialog, messagebox
 import os
 import emoji
+import customtkinter as ctk
 
 
 class Nahida4479Recorder:
@@ -169,12 +170,15 @@ def on_press(key):
 
 
 def setup_gui():
-    root = tk.Tk()
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+    
+    root = ctk.CTk()
     root.title("Nahida4479 Recorder")
-
-    root.configure(bg="#1e1e1e")
-    root.geometry("500x500")
-    current_file = {"path": None}
+    root.geometry("450x450")
+    root.resizable(False, False)
+    
+    current_file = {"path": None}        
     
     def save():
         if current_file["path"] is None:
@@ -217,7 +221,7 @@ def setup_gui():
             if key_name in key_map:
                 new_key = key_map[key_name]
                 if new_key in recorder.used_keys and recorder.used_keys[new_key] != attr_name:
-                    label.config(text=f"Error key set to: {recorder.used_keys[new_key]}!")
+                    label.configure(text=f"Error key set to: {recorder.used_keys[new_key]}!")
                     return
                 old_key = getattr(recorder, attr_name)
                 if old_key in recorder.used_keys:
@@ -225,11 +229,11 @@ def setup_gui():
                     
                 recorder.used_keys[new_key] = attr_name
                 setattr(recorder,attr_name,new_key)
-                label.config(text=f"Key set: {key_name}")
+                label.configure(text=f"Key set: {key_name}")
                 recorder.binding_mode = False
                 popup.after(800, popup.destroy)
             else:
-                label.config(text="ERROR: Use F1-F12 only!")
+                label.configure(text="ERROR: Use F1-F12 only!")
                 print(f"KEY BIND ERROR: {key_name} is not F1-F12")
 
         popup.bind("<Key>", on_key)
@@ -240,10 +244,9 @@ def setup_gui():
         )
 
     btn_style = {
-        "bg": "#252526",
-        "fg": "white",
-        "relief": "flat",
-        "activebackground": "#3e3e42",
+        "fg_color": "#252526",
+        "text_color": "white",
+        "hover_color": "#3e3e42",
         "font": ("Segoe UI", 9)
     }
     
@@ -266,30 +269,30 @@ def setup_gui():
         if not recorder.is_recording:
             recorder.start_recording()
             if recorder.is_recording:
-                record_btn.config(text="⏹ Stop Rec", bg="#7f0000")
+                record_btn.configure(text="⏹ Stop Rec", fg_color="#7f0000")
         else:
             recorder.stop_recording()
             if not recorder.is_recording:
-                record_btn.config(text="⏺ Record", bg="#c0392b")
+                record_btn.configure(text="⏺ Record", fg_color="#c0392b")
             
     def toggle_play():
         if not recorder.is_playing:
             def on_finished():
-                play_btn.config(text="▶ Play", bg="#27ae60")
+                play_btn.configure(text="▶ Play", fg_color="#27ae60")
             recorder.on_play_finished = on_finished
             t = threading.Thread(target=recorder.play_recording)
             t.daemon = True
             t.start()
-            root.after(100, lambda: play_btn.config(
+            root.after(100, lambda: play_btn.configure(
             text="⏹ Stop" if recorder.is_playing else "▶ Play",
-            bg="#c0392b" if recorder.is_playing else "#27ae60"   
+            fg_color="#c0392b" if recorder.is_playing else "#27ae60"   
             ))
-            play_btn.config(text="⏹ Stop", bg="#c0392b")
+            play_btn.configure(text="⏹ Stop", fg_color="#c0392b")
         else:
             recorder.is_playing = False
-            play_btn.config(text="▶ Play", bg="#27ae60")
+            play_btn.configure(text="▶ Play", fg_color="#27ae60")
     
-    file_context_menu = tk.Menu(root, tearoff=0, bg="#252526", fg="white", activebackground="#3e3e42", bd=0)
+    file_context_menu = tk.Menu(root, tearoff=0, bg="#252526", fg="white", bd=0)
     file_context_menu.add_command(label="Save", command=save)
     file_context_menu.add_command(label="Save as", command=save_as)
     file_context_menu.add_separator()
@@ -304,43 +307,54 @@ def setup_gui():
     key_menu.add_separator()
     key_menu.add_command(label="Emergency Stop Key", command=lambda: bind_key("Emergency Stop", "hotkey_emergency"))
     
-    top_bar = tk.Frame(root, bg="#252526", height=35)
+    top_bar = ctk.CTkFrame(root, fg_color="#2b2b2b", height=40, corner_radius=0)
     top_bar.pack(side="top", fill="x")
+    top_bar.pack_propagate(False)
 
-    file_btn = tk.Button(top_bar, text="File", command=show_file_menu, **btn_style)
+    file_btn = ctk.CTkButton(top_bar, text="File", command=show_file_menu, **btn_style)
     file_btn.pack(side="left", padx=5, pady=5)
     
-    edit_btn = tk.Button(top_bar, text="Edit", command=show_edit_menu, **btn_style)
+    edit_btn = ctk.CTkButton(top_bar, text="Edit", command=show_edit_menu, **btn_style)
     edit_btn.pack(side="left", padx=5, pady=5)
     
-    btn_style = {
-        "bg": "#252526",
-        "fg": "white",
-        "relief": "flat",
-        "activebackground": "#3e3e42",
-        "font": ("Segoe UI", 9),
-    }
 
+    status_label = ctk.CTkLabel(root, text="STATUS: READY", font=("Segoe UI", 20, "bold"))
+    status_label.pack(pady=10)
+    is_loop = ctk.BooleanVar()
+    control_bar = ctk.CTkFrame(root, fg_color="transparent")
+    control_bar.pack(side="top", pady=20, expand=True)
+    
+    record_btn = ctk.CTkButton(control_bar, text="⏺ Record", fg_color="#c0392b", font=("Segoe UI", 9), hover_color="#2ecc71", command=lambda: toggle_record())
+    record_btn.pack(side="left", padx=10)
+    
+    play_btn = ctk.CTkButton(control_bar, text="▶ Play", fg_color="#27ae60", font=("Segoe UI", 9), hover_color="#2ecc71", command=lambda: toggle_play())
+    play_btn.pack(side="left", padx=10)
+    
+    record_btn.configure(
+    height=60,                
+    width=160,                
+    font=("Segoe UI", 14, "bold"), 
+    corner_radius=12, 
+    fg_color="#c0392b",
+    hover_color="#c0392b"        
+    )
 
-    is_loop = tk.BooleanVar (value=False)
-    control_bar = tk.Frame(root, bg="#1e1e1e")
-    control_bar.pack(side="top", fill="x", padx=10, pady=5)
+    play_btn.configure(
+    height=60, 
+    width=160, 
+    font=("Segoe UI", 14, "bold"),
+    corner_radius=12
+    )
     
-    record_btn = tk.Button(control_bar, text="⏺ Record", bg="#c0392b", fg="white", relief="flat", font=("Segoe UI", 9), activebackground="#2ecc71", command=lambda: toggle_record())
-    record_btn.pack(side="left", padx=5)
+    loop_switch = ctk.CTkSwitch(control_bar, text="Loop", variable=is_loop)
+    loop_switch.pack(side="left", padx=10)
     
-    play_btn = tk.Button(control_bar, text="▶ Play", bg="#27ae60", fg="white", relief="flat", font=("Segoe UI", 9), activebackground="#2ecc71", command=lambda: toggle_play())
-    play_btn.pack(side="left", padx=5)
-    
-    loop_check = tk.Checkbutton(control_bar, text="Loop", variable=is_loop, bg="#1e1e1e", fg="white", selectcolor="#1e1e1e", activebackground="#1e1e1e", activeforeground="white", font=("Segoe UI", 9))
-    loop_check.pack(side="left", padx=5)
-    
-    toast_label = tk.Label(root, text="", bg="#27ae60", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=8)
+    toast_label = ctk.CTkLabel(root, text="", fg_color="#27ae60", text_color="white", font=("Segoe UI", 10, "bold"), padx=15, pady=8)
     
     def show_toast(message, color="#27ae60"):
         def _update():
             
-            toast_label.config(text=message, bg=color)
+            toast_label.configure(text=message, fg_color=color)
             toast_label.place(relx=0.5, rely=0.95, anchor="center")
             root.after(2000, lambda: toast_label.place_forget())        
         root.after(0, _update)
