@@ -40,7 +40,7 @@ btn_file = ctk.CTkButton(
     fg_color="#333333",        
     hover_color="#444444", 
     text_color="#FFFFFF", font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-    corner_radius=6            
+    corner_radius=6 )            
 btn_file.pack(side="left", padx=(5, 2))
 
 btn_edit = ctk.CTkButton(
