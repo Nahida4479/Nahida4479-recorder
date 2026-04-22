@@ -5,10 +5,14 @@ import time
 import tkinter as tk
 from tkinter import filedialog
 import os
+import sys
 
-os.environ["PYNPUT_BACKEND_MOUSE"] = "uinput"
-os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
+if os.name != "nt":
+    os.environ["PYNPUT_BACKEND_MOUSE"] = "uinput"
+    os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
 app = ctk.CTk()
+
+
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
