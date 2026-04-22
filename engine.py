@@ -3,6 +3,8 @@ import threading
 from pynput import mouse, keyboard
 import json
 import os
+import platform
+SYSTEM= platform.system()
 
 class Nahida4479Recorder:
     def __init__(self):
@@ -14,7 +16,6 @@ class Nahida4479Recorder:
         self.on_play_finished = None
         self.show_toast = None
         self.last_action_time = 0
-        self.cooldown = 1
         self.mouse_controller = mouse.Controller()
         self.kb_controller = keyboard.Controller()
         self.hotkey_start_play = keyboard.Key.f4
@@ -24,6 +25,11 @@ class Nahida4479Recorder:
         self.hotkey_emergency = keyboard.Key.f12
         self.binding_mode = False
         self.is_playing = False
+        try:
+            _ = self.mouse_controller.position
+        except Exception:
+            pass
+        
         
     def play_recording_is_thread(self):
         if not self.recorded_events:
@@ -38,9 +44,10 @@ class Nahida4479Recorder:
     def toggle_record(self):
         if not self.is_recording:
             self.start_recording()
+            return True
         else:
             self.stop_recording()
-            return False
+            return True
 
     def save_to_file(self, filepath):
         data = []
@@ -53,35 +60,36 @@ class Nahida4479Recorder:
         with open(filepath, "w") as f:
             json.dump(data, f, indent=4)
         print(f"Saved to {filepath}")
-
+        
+        
+    def load_from_file(self, filepath):
+        with open(filepath, "r") as f:
+            data = json.load(f)
+        self.recorded_events = []
+        for item in data:
+            if item["type"] == "click":
+                btn = mouse.Button.left if "left" in item["button"] else mouse.Button.right
+                self.recorded_events.append(("click", (item["x"], item["y"], btn), item["timestamp"]))
+            elif item["type"] == "key":
+                self.recorded_events.append(("key", item["key"], item["timestamp"]))
+        print(f"Loaded {len(self.recorded_events)} events from {filepath}")
+    
+    
     def add_event(self, event_type, data):
         if self.is_recording:
             timestamp = time.time() - self.start_time
             self.recorded_events.append((event_type, data, timestamp))
 
     def start_recording(self):
-        now = time.time()
-        elapsed = now - self.last_action_time
-        if elapsed < self.cooldown:
-            print(f"[ENGINE] Cooldown active: {round(3-elapsed, 1)}s remaining")
-            remaining = round(self.cooldown - elapsed, 1)
-            print(f"COOLDOWN: Wait {remaining}s")
-            if self.show_toast:
-                self.gui_log(f"Action blocked: Cooldown active ({round(self.cooldown - elapsed, 1)}s)")
-            return False
-        self.last_action_time = now
-        self.last_action_time = time.time()
         self.recorded_events = []
         self.start_time = time.time()
         self.is_recording = True
         print("[ENGINE] Recording started...")
         if self.show_toast:
             self.show_toast("⏺ Recording started!", "#c0392b")
-        return False
+        return True
 
     def stop_recording(self):
-        if time.time() - self.last_action_time < self.cooldown:
-            return
         self.last_action_time = time.time()
         self.is_recording = False
         print("REC STOP")
@@ -89,39 +97,54 @@ class Nahida4479Recorder:
             self.show_toast(f"⏹ Saved {len(self.recorded_events)} events", "#7f0000")
 
     def play_recording(self):
-        if time.time() - self.last_action_time < self.cooldown:
-            return False
         self.last_action_time = time.time()
         
         if not self.recorded_events:
             print("Error: No events to play! Record something first.")
             return False
-        if self.on_play_finished:
-            self.on_play_finished()
-            return True
 
         self.is_playing = True
         time.sleep(2)
-
-        last_time = 0
-        for i, (event_type, data, timestamp) in enumerate(self.recorded_events):
-            if not self.is_playing:
+        
+        while True:
+            last_time = 0
+            for i, (event_type, data, timestamp) in enumerate(self.recorded_events):
+                if not self.is_playing:
+                    break
+                wait_time = timestamp - last_time
+                if wait_time > 0:
+                    time.sleep(wait_time)
+                last_time = timestamp
+                if event_type == "move":
+                    x, y = data
+                    self.mouse_controller.position = (x, y)
+                elif event_type == "click":
+                    x, y, button = data
+                    if SYSTEM == "Windows":
+                        import ctypes
+                        ctypes.windll.user32.SetCursorPos(int(x), int(y))
+                        is_left = "left" in str(button).lower()
+                        flags_down = 0x0002 if is_left else 0x0008
+                        flags_up = 0x0004 if is_left else 0x0010
+                        ctypes.windll.user32.mouse_event(flags_down, 0, 0, 0, 0)
+                        ctypes.windll.user32.mouse_event(flags_up, 0, 0, 0, 0)
+                    else:
+                        self.mouse_controller.position = (x, y)
+                        self.mouse_controller.click(button)
+                        
+                elif event_type == "key":
+                    try:
+                        if SYSTEM == "Windows":
+                            import ctypes
+                            self.kb_controller.press(data)
+                            self.kb_controller.release(data)
+                        else:
+                            self.kb_controller.press(data)
+                            self.kb_controller.release(data)
+                    except Exception as e:
+                        pass
+            if not self.is_loop_enabled or not self.is_playing:
                 break
-            wait_time = timestamp - last_time
-            if wait_time > 0:
-                time.sleep(wait_time)
-            last_time = timestamp
-
-            if event_type == "click":
-                x, y, button = data
-                self.mouse_controller.position = (x, y)
-                self.mouse_controller.click(button)
-            elif event_type == "key":
-                try:
-                    self.kb_controller.press(data)
-                    self.kb_controller.release(data)
-                except Exception as e:
-                    pass
 
         self.is_playing = False
         print("PLAY FINISHED")
@@ -132,16 +155,15 @@ class Nahida4479Recorder:
         if self.show_toast:
             self.show_toast("▶ Playback finished!", "#27ae60")
 
-        if self.is_loop_enabled:
-            print("Looping...")
-            self.play_recording()
 
 recorder = Nahida4479Recorder()
 
 def on_click(x, y, button, pressed):
     if pressed and recorder.is_recording:
         recorder.add_event("click", (x, y, button))
-
+def on_move(x, y):
+    if recorder.is_recording:
+        recorder.add_event("move", (x, y))
 def on_press(key):
     if recorder.binding_mode: return
     try:
@@ -163,7 +185,7 @@ def on_press(key):
     except Exception:
         pass
 
-mouse_listener = mouse.Listener(on_click=on_click)
+mouse_listener = mouse.Listener(on_click=on_click, on_move=on_move)
 key_listener = keyboard.Listener(on_press=on_press)
 mouse_listener.start()
 key_listener.start()

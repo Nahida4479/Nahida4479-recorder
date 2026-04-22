@@ -2,6 +2,8 @@ import customtkinter as ctk
 import threading
 from engine import recorder
 import time
+import tkinter as tk
+from tkinter import filedialog
 
 app = ctk.CTk()
 
@@ -23,7 +25,7 @@ MENU_BG         = "#8b0000"
     
 
 app.title("Nahida4479 Recorder")
-app.geometry("480x380")          
+app.geometry("480x410")          
 app.resizable(False, False)
 app.configure(fg_color=BG_MAIN)
 
@@ -34,10 +36,117 @@ top_bar.pack_propagate(False)
 menu_container = ctk.CTkFrame(top_bar, fg_color="transparent", border_width=0, height=32)
 menu_container.pack(side="left", padx=10, pady=6)
 
-btn_file = ctk.CTkButton(menu_container, text="File", width=65, height=28, fg_color="#333333", hover_color="#444444", text_color="#FFFFFF", font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"), corner_radius=6 )            
-btn_file.pack(side="left", padx=(5, 2))
+def show_file_menu(event=None):
+    menu = tk.Menu(app, tearoff=0, bg="#333333", fg="white")
+    menu_ref[0] = menu
+    
+    def save_recording():
+            path = filedialog.asksaveasfilename(defaultextension=".json",
+                filetypes=[("JSON", "*.json")])
+            if path:
+                recorder.save_to_file(path)
+                
+    def load_recording():
+            path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+            if path:
+                recorder.load_from_file(path)
+            
+    menu.add_command(label="Save", command=save_recording)
+    menu.add_command(label="Load", command=load_recording)
+    menu.post(btn_file.winfo_rootx(), btn_file.winfo_rooty() + btn_file.winfo_height())
 
-btn_edit = ctk.CTkButton(menu_container, text="Edit", width=65, height=28, fg_color="#333333", hover_color="#444444", text_color="#FFFFFF", font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"), corner_radius=6)
+btn_file = ctk.CTkButton(menu_container, text="File", width=65, height=28, fg_color="#333333", hover_color="#444444", text_color="#FFFFFF", font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"), corner_radius=6, command=show_file_menu )            
+btn_file.pack(side="left", padx=(5, 2))
+menu_ref = [None]
+app.bind("<Configure>", lambda e: menu_ref[0].unpost() if menu_ref[0] else None)
+
+def show_edit_menu(event=None):
+    menu = tk.Menu(app, tearoff=0, bg="#333333", fg="white")
+    menu.add_command(label="Keybinds...", command=open_keybind_window)
+    menu.post(btn_edit.winfo_rootx(), btn_edit.winfo_rooty() + btn_edit.winfo_height())
+    menu_ref[0] = menu
+    
+def open_keybind_window():
+    win = tk.Toplevel(app)
+    win.title("Keybinds")
+    win.geometry("320x260")
+    win.configure(bg="#1e1e1e")
+    win.resizable(False, False)
+
+    labels = [
+        ("Start Play",  "hotkey_start_play"),
+        ("Stop Play",   "hotkey_stop_play"),
+        ("Start Rec",   "hotkey_start_rec"),
+        ("Stop Rec",    "hotkey_stop_rec"),
+        ("Emergency",   "hotkey_emergency"),
+    ]
+
+    entries = {}
+
+    for i, (label_text, attr) in enumerate(labels):
+        tk.Label(win, text=label_text, fg="#CCCCCC", bg="#1e1e1e",
+                 font=("Segoe UI", 11)).grid(row=i, column=0, padx=20, pady=8, sticky="w")
+        
+        current = getattr(recorder, attr)
+        # Zamień obiekt Key na czytelny string
+        if hasattr(current, 'name'):
+            current_str = current.name  # np. "f4"
+        else:
+            current_str = str(current)
+        
+        entry = tk.Entry(win, bg="#2a2a2a", fg="#FFFFFF", insertbackground="#FFFFFF",
+                        font=("Segoe UI", 11), width=12,
+                        highlightbackground="#555555", highlightthickness=1, relief="flat")
+        entry.insert(0, current_str)
+        entry.grid(row=i, column=1, padx=10, pady=8)
+        
+        # Kliknięcie w pole → czeka na wciśnięcie klawisza
+        def make_capture(e):
+            def on_click(event):
+                e.configure(fg="#ffcc00")
+                e.delete(0, tk.END)
+                e.insert(0, "Press a key...")
+                e.bind("<KeyPress>", lambda ev, ent=e: capture_key(ev, ent))
+                e.focus_set()
+            return on_click
+        
+        entry.bind("<Button-1>", make_capture(entry))
+        entries[attr] = entry
+
+    def capture_key(event, ent):
+        # Zamień tkinter keysym na pynput Key
+        key_name = event.keysym.lower()  # np. "f4", "f8"
+        ent.configure(fg="#FFFFFF")
+        ent.delete(0, tk.END)
+        ent.insert(0, key_name)
+        ent.unbind("<KeyPress>")
+
+    def apply_binds():
+        from pynput import keyboard as kb
+        key_map = {
+            'f1': kb.Key.f1, 'f2': kb.Key.f2, 'f3': kb.Key.f3,
+            'f4': kb.Key.f4, 'f5': kb.Key.f5, 'f6': kb.Key.f6,
+            'f7': kb.Key.f7, 'f8': kb.Key.f8, 'f9': kb.Key.f9,
+            'f10': kb.Key.f10, 'f11': kb.Key.f11, 'f12': kb.Key.f12,
+            'escape': kb.Key.esc, 'space': kb.Key.space,
+            'delete': kb.Key.delete, 'tab': kb.Key.tab,
+        }
+        for attr, entry in entries.items():
+            val = entry.get().lower()
+            if val in key_map:
+                setattr(recorder, attr, key_map[val])
+            elif len(val) == 1:
+                setattr(recorder, attr, kb.KeyCode.from_char(val))
+        log_to_gui("Keybinds updated!")
+        win.destroy()
+
+    tk.Button(win, text="Apply", command=apply_binds,
+              bg="#27ae60", fg="white", font=("Segoe UI", 11, "bold"),
+              relief="flat", padx=20, pady=6, cursor="hand2").grid(
+              row=len(labels), column=0, columnspan=2, pady=15)
+
+
+btn_edit = ctk.CTkButton(menu_container, text="Edit", width=65, height=28, fg_color="#333333", hover_color="#444444", text_color="#FFFFFF", font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"), corner_radius=6, command=show_edit_menu)
 btn_edit.pack(side="left", padx=(2, 5))
 
 status_label = ctk.CTkLabel(app, text="STATUS: READY", font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"), text_color="#FFFFFF")
@@ -67,7 +176,6 @@ def update_play_button():
         success = recorder.play_recording_is_thread()
         if success:
             btn_play.configure(text="⏹ Stop", fg_color="#c0392b")
-            threading.Thread(target=recorder.play_recording, daemon=True).start()
         else:
             btn_play.configure(text="▶  Play", fg_color=PLAY_COLOR)
     else:
@@ -167,5 +275,40 @@ def log_to_gui(message):
 recorder.gui_log = log_to_gui
 log_to_gui("System initialized and ready.")
 
+status_bar = ctk.CTkLabel(
+    app, text="", height=28, corner_radius=0,
+    font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+    text_color="#000000", fg_color="transparent"
+)
+status_bar.pack(fill="x", side="bottom", padx=0, pady=0)
+
+def update_status_bar():
+    if recorder.is_recording:
+        status_bar.configure(text="  ⏺  Recording...", fg_color="#FFFFFF", text_color="#000000")
+        
+        btn_file.configure(state="disabled")
+        btn_edit.configure(state="disabled")
+        btn_play.configure(state="disabled")
+        loop_switch.configure(state="disabled")
+        btn_record.configure(state="normal")
+    elif recorder.is_playing:
+        status_bar.configure(text="  ▶  Playing...", fg_color=PLAY_COLOR, text_color="#FFFFFF")
+        btn_file.configure(state="disabled")
+        btn_edit.configure(state="disabled")
+        btn_record.configure(state="disabled")
+        btn_play.configure(state="normal")
+        loop_switch.configure(state="disabled")
+    else:
+        status_bar.configure(text="", fg_color="transparent")
+        btn_file.configure(state="normal")
+        btn_edit.configure(state="normal")
+        btn_play.configure(state="normal")
+        btn_record.configure(state="normal")
+        loop_switch.configure(state="normal")
+        
+    app.after(200, update_status_bar)
+
+update_status_bar()
+    
 if __name__ == "__main__":
     app.mainloop()
