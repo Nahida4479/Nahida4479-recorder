@@ -4,7 +4,10 @@ from engine import recorder
 import time
 import tkinter as tk
 from tkinter import filedialog
+import os
 
+os.environ["PYNPUT_BACKEND_MOUSE"] = "uinput"
+os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
 app = ctk.CTk()
 
 ctk.set_appearance_mode("dark")
@@ -37,23 +40,42 @@ menu_container = ctk.CTkFrame(top_bar, fg_color="transparent", border_width=0, h
 menu_container.pack(side="left", padx=10, pady=6)
 
 def show_file_menu(event=None):
-    menu = tk.Menu(app, tearoff=0, bg="#333333", fg="white")
+    if menu_ref[0] is not None:
+        try:
+            menu_ref[0].destroy()
+        except:
+            pass
+        menu_ref[0] = None
+        return
+    
+    menu = tk.Menu(app, tearoff=0, bg="#333333", fg="white", activebackground="#444444")
     menu_ref[0] = menu
     
     def save_recording():
+            menu_ref[0] = None
             path = filedialog.asksaveasfilename(defaultextension=".json",
                 filetypes=[("JSON", "*.json")])
             if path:
                 recorder.save_to_file(path)
                 
     def load_recording():
+            menu_ref[0] = None
             path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
             if path:
                 recorder.load_from_file(path)
             
     menu.add_command(label="Save", command=save_recording)
     menu.add_command(label="Load", command=load_recording)
-    menu.post(btn_file.winfo_rootx(), btn_file.winfo_rooty() + btn_file.winfo_height())
+    try:
+        menu.post(btn_file.winfo_rootx(), btn_file.winfo_rooty() + btn_file.winfo_height())
+    except:
+        menu_ref[0] = None
+
+def set_menu_ref_none():
+    app.after(100, lambda: _clear_ref())
+    
+def _clear_ref():
+    menu_ref[0] = None
 
 btn_file = ctk.CTkButton(menu_container, text="File", width=65, height=28, fg_color="#333333", hover_color="#444444", text_color="#FFFFFF", font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"), corner_radius=6, command=show_file_menu )            
 btn_file.pack(side="left", padx=(5, 2))
@@ -61,11 +83,21 @@ menu_ref = [None]
 app.bind("<Configure>", lambda e: menu_ref[0].unpost() if menu_ref[0] else None)
 
 def show_edit_menu(event=None):
-    menu = tk.Menu(app, tearoff=0, bg="#333333", fg="white")
-    menu.add_command(label="Keybinds...", command=open_keybind_window)
-    menu.post(btn_edit.winfo_rootx(), btn_edit.winfo_rooty() + btn_edit.winfo_height())
+    if menu_ref[0] is not None:
+        try:
+            menu_ref[0].destroy()
+        except:
+            pass
+        menu_ref[0] = None
+        return
+    menu = tk.Menu(app, tearoff=0, bg="#333333", fg="white", activebackground="#444444")
     menu_ref[0] = menu
+    menu.add_command(label="Keybinds...", command=open_keybind_window)
     
+    try:
+        menu.post(btn_edit.winfo_rootx(), btn_edit.winfo_rooty() + btn_edit.winfo_height())
+    except:
+        menu_ref[0] = None
 def open_keybind_window():
     win = tk.Toplevel(app)
     win.title("Keybinds")

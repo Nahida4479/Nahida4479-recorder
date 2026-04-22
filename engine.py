@@ -5,6 +5,8 @@ import json
 import os
 import platform
 SYSTEM= platform.system()
+os.environ["PYNPUT_BACKEND_MOUSE"] = "uinput"
+os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
 
 class Nahida4479Recorder:
     def __init__(self):
@@ -29,7 +31,20 @@ class Nahida4479Recorder:
             _ = self.mouse_controller.position
         except Exception:
             pass
-        
+        if SYSTEM != "Windows":
+            import os
+            
+            os.environ["PYINPUT_BACKEND_MOUSE"] = "uinpiut"
+            os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
+            
+            try:
+                self.mouse_controller = mouse.Controller()
+                self.kb_controller = keyboard.Controller()
+            except Exception as e:
+                print(f"Erro uinput: {e}. sudo chmod +0666 /dev/uinput?")
+        else:
+            self.mouse_controller = mouse.Controller()
+            self.kb_controller = keyboard.Controller()
         
     def play_recording_is_thread(self):
         if not self.recorded_events:
