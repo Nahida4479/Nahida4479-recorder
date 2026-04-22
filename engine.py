@@ -165,7 +165,8 @@ def on_move(x, y):
     if recorder.is_recording:
         recorder.add_event("move", (x, y))
 def on_press(key):
-    if recorder.binding_mode: return
+    if recorder.binding_mode: 
+        return
     try:
         if key == recorder.hotkey_emergency:
             recorder.is_playing = False

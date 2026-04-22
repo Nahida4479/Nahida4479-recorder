@@ -100,26 +100,31 @@ def open_keybind_window():
         entry.insert(0, current_str)
         entry.grid(row=i, column=1, padx=10, pady=8)
         
-        # Kliknięcie w pole → czeka na wciśnięcie klawisza
-        def make_capture(e):
+        
+        def make_capture(e, attr_name):
             def on_click(event):
+                recorder.binding_mode = True
                 e.configure(fg="#ffcc00")
                 e.delete(0, tk.END)
                 e.insert(0, "Press a key...")
-                e.bind("<KeyPress>", lambda ev, ent=e: capture_key(ev, ent))
+                
+                e.bind("<KeyPress>", lambda ev, ent=e: capture_key(ev, ent, attr_name))
                 e.focus_set()
             return on_click
         
-        entry.bind("<Button-1>", make_capture(entry))
+        entry.bind("<Button-1>", make_capture(entry, attr))
         entries[attr] = entry
 
-    def capture_key(event, ent):
-        # Zamień tkinter keysym na pynput Key
-        key_name = event.keysym.lower()  # np. "f4", "f8"
+    def capture_key(event, ent, attr_name):
+        
+        key_name = event.keysym.lower()  
         ent.configure(fg="#FFFFFF")
         ent.delete(0, tk.END)
         ent.insert(0, key_name)
         ent.unbind("<KeyPress>")
+        
+        recorder.binding_mode = False
+        log_to_gui(f"Captured key for {attr_name}: {key_name}")
 
     def apply_binds():
         from pynput import keyboard as kb
