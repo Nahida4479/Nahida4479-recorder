@@ -93,7 +93,8 @@ class Nahida4479Recorder:
                 dev = dev_map[fd]
                 try:
                     for ev in dev.read():
-                        if not self.is_recording: break
+                        if not self.is_recording: 
+                            break
                         ts = ev.timestamp() - self.start_time
                         
                         if ev.type == ecodes.EV_KEY:
@@ -214,6 +215,15 @@ class Nahida4479Recorder:
                 if event_type == "move":
                     x, y = data
                     self.mouse_controller.position = (x, y)
+                    
+                elif event_type == "move_rel":
+                    from evdev import ecodes
+                    code, value = data
+                    if code == ecodes.REL_X:
+                        self.mouse_controller.move(value, 0)
+                    elif code == ecodes.REL_Y:
+                        self.mouse_controller.move(0, value)
+                        
                 elif event_type == "click":
                     x, y, button = data
                     if SYSTEM == "Windows":
@@ -230,8 +240,10 @@ class Nahida4479Recorder:
                         
                 elif event_type == "key":
                     try:
-                        # Rozróżniamy: string z JSON vs obiekt pynput z nagrania na żywo
-                        if isinstance(data, str):
+                        if isinstance(data, int):
+                            print(f"[PLAY] Linux Key Code: {data}")
+                            
+                        elif isinstance(data, str):
                             if data.startswith("Key."):
                                 key_name = data.split(".")[1]
                                 key_obj = getattr(keyboard.Key, key_name, None)
@@ -244,7 +256,6 @@ class Nahida4479Recorder:
                                     self.kb_controller.press(char)
                                     self.kb_controller.release(char)
                         else:
-                            # obiekt pynput – działa tak samo na Windows i Linux
                             self.kb_controller.press(data)
                             self.kb_controller.release(data)
                     except Exception as e:
