@@ -1,52 +1,108 @@
 import platform
 import os
 import sys
-SYSTEM = platform.system()
+import time
+import threading
+import json
+from pynput import mouse, keyboard
 
-if SYSTEM != "Linux":
+SYSTEM = platform.system()
+LINUX_EVDEV = False
+
+if SYSTEM == "Linux":
     try:
         from evdev import UInput, ecodes as e, list_devices, InputDevice
         LINUX_EVDEV = True
     except ImportError:
         LINUX_EVDEV = False
-    
-    mouse_lib = None
-    keyboard_lib = None
-elif SYSTEM == "Windows":
-    LINUX_EVDEV = False
-    from pynput import mouse, keyboard
-    mouse_lib = mouse
-    keyboard_lib = keyboard
-            
-import time
-import threading
-import json
-from pynput import mouse, keyboard
+        
 
 class Nahida4479Recorder:
     def __init__(self):
         self.is_loop_enabled = False
         self.recorded_events = []
         self.is_recording = False
+        self.is_playing = False
         self.start_time = 0
-        self.used_keys = {}
-        self.on_play_finished = None
-        self.show_toast = None
         self.last_action_time = 0
+        
         self.mouse_controller = mouse.Controller()
         self.kb_controller = keyboard.Controller()
+        
         self.hotkey_start_play = keyboard.Key.f4
         self.hotkey_stop_play = keyboard.Key.f6
         self.hotkey_start_rec = keyboard.Key.f8
         self.hotkey_stop_rec = keyboard.Key.f9
         self.hotkey_emergency = keyboard.Key.f12
-        self.binding_mode = False
-        self.is_playing = False
-        self.on_before_play = None
-        self.on_before_play = None
-        self.mouse_controller = mouse.Controller()
-        self.kb_controller = keyboard.Controller()
         
+        self.on_play_finished = None
+        self.on_before_play = None
+        self.show_toast = None
+        self.binding_mode = False
+        
+        self._evdev_devices = []
+        
+        if SYSTEM == "Linux" and LINUX_EVDEV:
+            self._setup_linux_devices()
+            threading.Thread(target=self._linux_hotkey_loop, daemon=True).start()
+            
+            
+    def _setup_linux_devices(self):
+        from evdev import list_devices, InputDevice, ecodes
+        for path in list_devices():
+            try:
+                dev = InputDevice(path)
+                
+                if any(cap in dev.capabilities() for cap in [ecodes.EV_KEY, ecodes.EV_REL]):       
+                    self._evdev_devices.append(dev)
+            except (PermissionError, OSError):
+                continue
+            
+    def _linux_hotkey_loop(self):
+        import select
+        from evdev import ecodes
+        dev_map = {dev.fd: dev for dev in self._evdev_devices}
+        
+        while True:
+            r, _, _ = select.select(list(dev_map.keys()), [], [])
+            for fd in r:
+                try:
+                    for ev in dev_map[fd].read():
+                        if ev.type == ecodes.EV_KEY and ev.value == 1: 
+                            key_name = ecodes.KEY.get(ev.code, "UNKNOWN")
+                            
+
+                            if key_name == "KEY_F8":
+                                self.start_recording()
+                            elif key_name == "KEY_F9":
+                                self.stop_recording()
+                            elif key_name == "KEY_F12":
+                                os._exit(0)
+                except (BlockingIOError, OSError):
+                    continue
+                                   
+    def _linux_record_loop(self):
+        import select
+        from evdev import ecodes
+        dev_map = {dev.fd: dev for dev in self._evdev_devices}
+        
+        print("[ENGINE] Linux Record Loop started.")
+        while self.is_recording:
+            r, _, _ = select.select(list(dev_map.keys()), [], [], 0.1)
+            for fd in r:
+                dev = dev_map[fd]
+                try:
+                    for ev in dev.read():
+                        if not self.is_recording: break
+                        ts = ev.timestamp() - self.start_time
+                        
+                        if ev.type == ecodes.EV_KEY:
+                            self.recorded_events.append(("key", ev.code, ts))
+                        elif ev.type == ecodes.EV_REL:
+                            self.recorded_events.append(("move_rel", (ev.code, ev.value), ts))
+                except (BlockingIOError, OSError):
+                    continue
+                        
     def play_recording_is_thread(self):
         if not self.recorded_events:
             print("ERROR: No events recorded! Cannot play.")
@@ -98,17 +154,38 @@ class Nahida4479Recorder:
 
     def start_recording(self):
         self.recorded_events = []
-        self.start_time = time.time()
         self.is_recording = True
-        print("[ENGINE] Recording started...")
+        self.start_time = time.time()
+        
         if self.show_toast:
             self.show_toast("⏺ Recording started!", "#c0392b")
+            
+            
+        if SYSTEM == "Linux" and LINUX_EVDEV:
+            self.recording_thread = threading.Thread(target=self._linux_record_loop, daemon=True)
+            self.recording_thread.start()
+        else:
+            from pynput import mouse, keyboard
+            self.m_rec = mouse.Listener(on_click=self.on_click, on_move=self.on_move)
+            self.k_rec = keyboard.Listener(on_press=self.on_k_press, on_release=self.on_k_release)
+            self.m_rec.start()
+            self.k_rec.start()
         return True
-
+  
+    
+    
     def stop_recording(self):
         self.last_action_time = time.time()
         self.is_recording = False
         print("REC STOP")
+        
+        if hasattr(self, 'm_rec') and self.m_rec:
+            self.m_rec.stop()
+            self.m_rec = None
+        if hasattr(self, 'k_rec') and self.k_rec:
+            self.k_rec.stop()
+            self.k_rec = None
+        
         if self.show_toast:
             self.show_toast(f"⏹ Saved {len(self.recorded_events)} events", "#7f0000")
 
@@ -227,7 +304,3 @@ def on_press(key):
     except Exception as e:
         print(f"ERROR: Keybinds")
 
-mouse_listener = mouse.Listener(on_click=on_click, on_move=on_move)
-key_listener = keyboard.Listener(on_press=on_press)
-mouse_listener.start()
-key_listener.start()
