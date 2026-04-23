@@ -1,12 +1,16 @@
+import platform
+import os
+import sys
+SYSTEM = platform.system()
+
+if SYSTEM != "Windows":
+    os.environ["PYNPUT_BACKEND_MOUSE"] = "uinput"
+    os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
+            
 import time
 import threading
-from pynput import mouse, keyboard
 import json
-import os
-import platform
-SYSTEM= platform.system()
-os.environ["PYNPUT_BACKEND_MOUSE"] = "uinput"
-os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
+from pynput import mouse, keyboard
 
 class Nahida4479Recorder:
     def __init__(self):
@@ -27,24 +31,10 @@ class Nahida4479Recorder:
         self.hotkey_emergency = keyboard.Key.f12
         self.binding_mode = False
         self.is_playing = False
-        try:
-            _ = self.mouse_controller.position
-        except Exception:
-            pass
-        if SYSTEM != "Windows":
-            import os
-            
-            os.environ["PYINPUT_BACKEND_MOUSE"] = "uinpiut"
-            os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
-            
-            try:
-                self.mouse_controller = mouse.Controller()
-                self.kb_controller = keyboard.Controller()
-            except Exception as e:
-                print(f"Erro uinput: {e}. sudo chmod +0666 /dev/uinput?")
-        else:
-            self.mouse_controller = mouse.Controller()
-            self.kb_controller = keyboard.Controller()
+        self.on_before_play = None
+        self.on_before_play = None
+        self.mouse_controller = mouse.Controller()
+        self.kb_controller = keyboard.Controller()
         
     def play_recording_is_thread(self):
         if not self.recorded_events:
@@ -119,6 +109,9 @@ class Nahida4479Recorder:
             return False
 
         self.is_playing = True
+        
+        if self.on_before_play:
+            self.on_before_play()
         time.sleep(2)
         
         while True:
@@ -149,15 +142,25 @@ class Nahida4479Recorder:
                         
                 elif event_type == "key":
                     try:
-                        if SYSTEM == "Windows":
-                            import ctypes
-                            self.kb_controller.press(data)
-                            self.kb_controller.release(data)
+                        # Rozróżniamy: string z JSON vs obiekt pynput z nagrania na żywo
+                        if isinstance(data, str):
+                            if data.startswith("Key."):
+                                key_name = data.split(".")[1]
+                                key_obj = getattr(keyboard.Key, key_name, None)
+                                if key_obj:
+                                    self.kb_controller.press(key_obj)
+                                    self.kb_controller.release(key_obj)
+                            else:
+                                char = data.replace("'", "").strip()
+                                if len(char) == 1:
+                                    self.kb_controller.press(char)
+                                    self.kb_controller.release(char)
                         else:
+                            # obiekt pynput – działa tak samo na Windows i Linux
                             self.kb_controller.press(data)
                             self.kb_controller.release(data)
                     except Exception as e:
-                        pass
+                        print(f"[KEY ERROR] {e} – data: {data}")
             if not self.is_loop_enabled or not self.is_playing:
                 break
 
@@ -183,23 +186,35 @@ def on_press(key):
     if recorder.binding_mode: 
         return
     try:
+        
+        hotkeys = [
+            recorder.hotkey_emergency,
+            recorder.hotkey_start_rec,
+            recorder.hotkey_stop_rec,
+            recorder.hotkey_start_play,
+            recorder.hotkey_stop_play
+        ]
         if key == recorder.hotkey_emergency:
             recorder.is_playing = False
             recorder.is_recording = False
             os._exit(0)
         elif key == recorder.hotkey_start_rec:
             if not recorder.is_recording: recorder.start_recording()
+            return
         elif key == recorder.hotkey_stop_rec:
-            if recorder.is_recording: recorder.stop_recording()
+            if recorder.is_recording: 
+                recorder.stop_recording()
+                return
+            
         elif key == recorder.hotkey_start_play:
             if not recorder.is_playing:
                 threading.Thread(target=recorder.play_recording, daemon=True).start()
         elif key == recorder.hotkey_stop_play:
             recorder.is_playing = False
-        elif recorder.is_recording:
+        elif recorder.is_recording and key not in hotkeys:
             recorder.add_event("key", key)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"ERROR: Keybinds")
 
 mouse_listener = mouse.Listener(on_click=on_click, on_move=on_move)
 key_listener = keyboard.Listener(on_press=on_press)

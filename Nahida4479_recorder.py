@@ -8,8 +8,8 @@ import os
 import sys
 
 if os.name != "nt":
-    os.environ["PYNPUT_BACKEND_MOUSE"] = "uinput"
-    os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
+    os.environ["PYNPUT_BACKEND_MOUSE"] = "xorg"
+    os.environ["PYNPUT_BACKEND_KEYBOARD"] = "xorg"
 app = ctk.CTk()
 
 
@@ -214,20 +214,29 @@ def update_record_button():
 
 def update_play_button():
     if not recorder.is_playing:
-        success = recorder.play_recording_is_thread()
-        if success:
-            btn_play.configure(text="⏹ Stop", fg_color="#c0392b")
-        else:
-            btn_play.configure(text="▶  Play", fg_color=PLAY_COLOR)
+        app.after(150, _start_play_delayed)
     else:
         recorder.is_playing = False
         btn_play.configure(text="▶  Play", fg_color=PLAY_COLOR)
+        
+def _start_play_delayed():
+     success = recorder.play_recording_is_thread()
+     if success:
+         btn_play.configure(text="⏹ Stop", fg_color="#c0392b")
+     else:
+         btn_play.configure(text="▶  Play", fg_color=PLAY_COLOR)
     
 
 def reset_play_button():
+    app.deiconify()
     btn_play.configure(text="▶  Play", fg_color=PLAY_COLOR)
 
 recorder.on_play_finished = reset_play_button
+
+def release_focus():
+    app.iconify()
+    
+recorder.on_before_play = release_focus
 
 def update_loop():
     recorder.is_loop_enabled = bool(loop_switch.get())
