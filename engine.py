@@ -85,7 +85,8 @@ class Nahida4479Recorder:
                             elif key_name == "KEY_F9":
                                 self.stop_recording()
                             elif key_name == "KEY_F6":
-                                self.stop_recording()
+                                print("[DEBUG] F6 Pressed - Stopping Playback")
+                                self.is_playing = False
                             elif key_name == "KEY_F4":
                                 self.play_recording_is_thread()
                             elif key_name == "KEY_F12":
@@ -232,9 +233,15 @@ class Nahida4479Recorder:
                 
                 wait_time = timestamp - last_time
                 if wait_time > 0:
-                    time.sleep(wait_time)
-                else: 
-                    time.sleep(0.001)
+                    if wait_time > 0:
+                        steps = int(wait_time / 0.05)
+                        for _ in range(steps):
+                            if not self.is_playing: break
+                            time.sleep(0.05)
+                        if self.is_playing:
+                            time.sleep(wait_time % 0.05)
+                        else: 
+                            time.sleep(0.001)
                 last_time = timestamp
 
                 if event_type == "start_pos":
@@ -316,6 +323,9 @@ def on_press(key):
             recorder.is_playing = False
         elif recorder.is_recording and key not in hotkeys:
             recorder.add_event("key", key)
+        elif key == recorder.hotkey_stop_play:
+            print("ACTION: F6 pressed, setting is_playing to False")
+            recorder.is_playing = False
     except Exception as e:
         print(f"ERROR: Keybinds")
 
