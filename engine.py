@@ -3,9 +3,20 @@ import os
 import sys
 SYSTEM = platform.system()
 
-if SYSTEM != "Windows":
-    os.environ["PYNPUT_BACKEND_MOUSE"] = "uinput"
-    os.environ["PYNPUT_BACKEND_KEYBOARD"] = "uinput"
+if SYSTEM != "Linux":
+    try:
+        from evdev import UInput, ecodes as e, list_devices, InputDevice
+        LINUX_EVDEV = True
+    except ImportError:
+        LINUX_EVDEV = False
+    
+    mouse_lib = None
+    keyboard_lib = None
+elif SYSTEM == "Windows":
+    LINUX_EVDEV = False
+    from pynput import mouse, keyboard
+    mouse_lib = mouse
+    keyboard_lib = keyboard
             
 import time
 import threading
