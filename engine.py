@@ -42,7 +42,15 @@ class Nahida4479Recorder:
         
         self._evdev_devices = []
         
+        self.ui = None
         if SYSTEM == "Linux" and LINUX_EVDEV:
+            from evdev import UInput, ecodes
+            
+            cap = {
+                ecodes.EV_KEY: [ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.KEY_F8, ecodes.KEY_F9],
+                ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y]
+            }
+            self.ui = UInput(cap, name="Nahida-Virtual-Mouse", version=0x3)
             self._setup_linux_devices()
             threading.Thread(target=self._linux_hotkey_loop, daemon=True).start()
             
@@ -76,6 +84,10 @@ class Nahida4479Recorder:
                                 self.start_recording()
                             elif key_name == "KEY_F9":
                                 self.stop_recording()
+                            elif key_name == "KEY_F6":
+                                self.stop_recording()
+                            elif key_name == "KEY_F4":
+                                self.play_recording_is_thread()
                             elif key_name == "KEY_F12":
                                 os._exit(0)
                 except (BlockingIOError, OSError):
@@ -83,12 +95,15 @@ class Nahida4479Recorder:
                                    
     def _linux_record_loop(self):
         import select
+        import time
         from evdev import ecodes
         dev_map = {dev.fd: dev for dev in self._evdev_devices}
         
         print("[ENGINE] Linux Record Loop started.")
         while self.is_recording:
-            r, _, _ = select.select(list(dev_map.keys()), [], [], 0.1)
+            r, _, _ = select.select(list(dev_map.keys()), [], [], 0.01)
+            
+            time.sleep(0.001)
             for fd in r:
                 dev = dev_map[fd]
                 try:
@@ -99,6 +114,9 @@ class Nahida4479Recorder:
                         
                         if ev.type == ecodes.EV_KEY:
                             self.recorded_events.append(("key", ev.code, ts))
+                        if ev.code == 67: #F9
+                            self.is_recording = False
+                            break
                         elif ev.type == ecodes.EV_REL:
                             self.recorded_events.append(("move_rel", (ev.code, ev.value), ts))
                 except (BlockingIOError, OSError):
@@ -158,6 +176,10 @@ class Nahida4479Recorder:
         self.is_recording = True
         self.start_time = time.time()
         
+        start_pos = self.mouse_controller.position
+        self.recorded_events.append(("start_pos", start_pos, 0))
+        
+        
         if self.show_toast:
             self.show_toast("⏺ Recording started!", "#c0392b")
             
@@ -178,7 +200,7 @@ class Nahida4479Recorder:
     def stop_recording(self):
         self.last_action_time = time.time()
         self.is_recording = False
-        print("REC STOP")
+        print("SCRIPT STOP")
         
         if hasattr(self, 'm_rec') and self.m_rec:
             self.m_rec.stop()
@@ -201,67 +223,49 @@ class Nahida4479Recorder:
         
         if self.on_before_play:
             self.on_before_play()
-        time.sleep(2)
-        
-        while True:
+        time.sleep(1)
+        while self.is_playing:
             last_time = 0
             for i, (event_type, data, timestamp) in enumerate(self.recorded_events):
                 if not self.is_playing:
                     break
+                
                 wait_time = timestamp - last_time
                 if wait_time > 0:
                     time.sleep(wait_time)
+                else: 
+                    time.sleep(0.001)
                 last_time = timestamp
-                if event_type == "move":
-                    x, y = data
-                    self.mouse_controller.position = (x, y)
-                    
+
+                if event_type == "start_pos":
+                    self.mouse_controller.position = data
+
                 elif event_type == "move_rel":
-                    from evdev import ecodes
                     code, value = data
-                    if code == ecodes.REL_X:
+                    if code == 0:
                         self.mouse_controller.move(value, 0)
-                    elif code == ecodes.REL_Y:
+                    elif code == 1:
                         self.mouse_controller.move(0, value)
-                        
+
+                elif event_type == "move":
+                    self.mouse_controller.position = data
+
                 elif event_type == "click":
                     x, y, button = data
-                    if SYSTEM == "Windows":
-                        import ctypes
-                        ctypes.windll.user32.SetCursorPos(int(x), int(y))
-                        is_left = "left" in str(button).lower()
-                        flags_down = 0x0002 if is_left else 0x0008
-                        flags_up = 0x0004 if is_left else 0x0010
-                        ctypes.windll.user32.mouse_event(flags_down, 0, 0, 0, 0)
-                        ctypes.windll.user32.mouse_event(flags_up, 0, 0, 0, 0)
-                    else:
-                        self.mouse_controller.position = (x, y)
-                        self.mouse_controller.click(button)
-                        
+                    self.mouse_controller.position = (x, y)
+                    self.mouse_controller.click(data[2])
+
                 elif event_type == "key":
                     try:
                         if isinstance(data, int):
-                            print(f"[PLAY] Linux Key Code: {data}")
-                            
-                        elif isinstance(data, str):
-                            if data.startswith("Key."):
-                                key_name = data.split(".")[1]
-                                key_obj = getattr(keyboard.Key, key_name, None)
-                                if key_obj:
-                                    self.kb_controller.press(key_obj)
-                                    self.kb_controller.release(key_obj)
-                            else:
-                                char = data.replace("'", "").strip()
-                                if len(char) == 1:
-                                    self.kb_controller.press(char)
-                                    self.kb_controller.release(char)
+                            pass
                         else:
                             self.kb_controller.press(data)
                             self.kb_controller.release(data)
                     except Exception as e:
                         print(f"[KEY ERROR] {e} – data: {data}")
-            if not self.is_loop_enabled or not self.is_playing:
-                break
+                if not self.is_loop_enabled or not self.is_playing:
+                    break
 
         self.is_playing = False
         print("PLAY FINISHED")

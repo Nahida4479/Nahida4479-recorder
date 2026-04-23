@@ -234,7 +234,7 @@ def reset_play_button():
 recorder.on_play_finished = reset_play_button
 
 def release_focus():
-    app.iconify()
+    app.after(100, lambda: app.lower())
     
 recorder.on_before_play = release_focus
 
