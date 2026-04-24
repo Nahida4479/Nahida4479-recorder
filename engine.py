@@ -55,6 +55,16 @@ class Nahida4479Recorder:
             threading.Thread(target=self._linux_hotkey_loop, daemon=True).start()
             
             
+    def _track_mouse_pos(self):
+        last_pos = None
+        while self.is_recording:
+            pos = self.mouse_controller.position
+            if pos != last_pos:
+                ts = time.time() - self.start_time
+                self.recorded_events.append(("move", pos, ts))
+                last_pos = pos
+            time.sleep(0.016)
+            
     def _setup_linux_devices(self):
         from evdev import list_devices, InputDevice, ecodes
         for path in list_devices():
@@ -114,12 +124,11 @@ class Nahida4479Recorder:
                         ts = ev.timestamp() - self.start_time
                         
                         if ev.type == ecodes.EV_KEY:
-                            self.recorded_events.append(("key", ev.code, ts))
-                        if ev.code == 67: #F9
-                            self.is_recording = False
-                            break
-                        elif ev.type == ecodes.EV_REL:
-                            self.recorded_events.append(("move_rel", (ev.code, ev.value), ts))
+                            if ev.code == 67:  # F9 
+                                self.is_recording = False
+                                break
+                            else:
+                                self.recorded_events.append(("key", ev.code, ts))
                 except (BlockingIOError, OSError):
                     continue
                         
@@ -188,6 +197,9 @@ class Nahida4479Recorder:
         if SYSTEM == "Linux" and LINUX_EVDEV:
             self.recording_thread = threading.Thread(target=self._linux_record_loop, daemon=True)
             self.recording_thread.start()
+            
+            self._mouse_track_thread = threading.Thread(target=self._track_mouse_pos, daemon=True)
+            self._mouse_track_thread.start()
         else:
             from pynput import mouse, keyboard
             self.m_rec = mouse.Listener(on_click=self.on_click, on_move=self.on_move)
@@ -224,35 +236,38 @@ class Nahida4479Recorder:
         
         if self.on_before_play:
             self.on_before_play()
+            
         time.sleep(1)
+        
         while self.is_playing:
             last_time = 0
-            for i, (event_type, data, timestamp) in enumerate(self.recorded_events):
+            
+            for (event_type, data, timestamp) in self.recorded_events:
                 if not self.is_playing:
                     break
                 
                 wait_time = timestamp - last_time
                 if wait_time > 0:
-                    if wait_time > 0:
-                        steps = int(wait_time / 0.05)
-                        for _ in range(steps):
-                            if not self.is_playing: break
-                            time.sleep(0.05)
-                        if self.is_playing:
-                            time.sleep(wait_time % 0.05)
-                        else: 
-                            time.sleep(0.001)
-                last_time = timestamp
+                    steps = int(wait_time / 0.02)
+                    for _ in range(steps):
+                        if not self.is_playing: 
+                            break
+                        time.sleep(0.02)
+                    if self.is_playing:
+                        time.sleep(wait_time % 0.02)
 
+                last_time = timestamp
+                    
+                    
                 if event_type == "start_pos":
                     self.mouse_controller.position = data
 
                 elif event_type == "move_rel":
                     code, value = data
                     if code == 0:
-                        self.mouse_controller.move(value, 0)
+                        self._rel_x = getattr(self, '_rel_x') + value
                     elif code == 1:
-                        self.mouse_controller.move(0, value)
+                        self._rel_y = getattr(self, '_rel_y', 0) + value
 
                 elif event_type == "move":
                     self.mouse_controller.position = data
@@ -260,19 +275,17 @@ class Nahida4479Recorder:
                 elif event_type == "click":
                     x, y, button = data
                     self.mouse_controller.position = (x, y)
-                    self.mouse_controller.click(data[2])
+                    self.mouse_controller.click(button)
 
                 elif event_type == "key":
                     try:
-                        if isinstance(data, int):
-                            pass
-                        else:
+                        if not isinstance(data, int):
                             self.kb_controller.press(data)
                             self.kb_controller.release(data)
-                    except Exception as e:
-                        print(f"[KEY ERROR] {e} – data: {data}")
-                if not self.is_loop_enabled or not self.is_playing:
-                    break
+                    except Exception as ex:
+                        print(f"[KEY ERROR] {ex} – data: {data}")
+            if not self.is_loop_enabled or not self.is_playing:
+                break
 
         self.is_playing = False
         print("PLAY FINISHED")
