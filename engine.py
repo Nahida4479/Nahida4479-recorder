@@ -88,7 +88,6 @@ class Nahida4479Recorder:
                     for ev in dev_map[fd].read():
                         if ev.type == ecodes.EV_KEY and ev.value == 1: 
                             key_name = ecodes.KEY.get(ev.code, "UNKNOWN")
-                            
 
                             if key_name == "KEY_F8":
                                 self.start_recording()
@@ -110,11 +109,11 @@ class Nahida4479Recorder:
         from evdev import ecodes
         dev_map = {dev.fd: dev for dev in self._evdev_devices}
         
-        print("[ENGINE] Linux Record Loop started.")
+        control_codes = {62, 64, 66, 67, 88}
+
         while self.is_recording:
             r, _, _ = select.select(list(dev_map.keys()), [], [], 0.01)
-            
-            time.sleep(0.001)
+        
             for fd in r:
                 dev = dev_map[fd]
                 try:
@@ -124,11 +123,8 @@ class Nahida4479Recorder:
                         ts = ev.timestamp() - self.start_time
                         
                         if ev.type == ecodes.EV_KEY:
-                            if ev.code == 67:  # F9 
-                                self.is_recording = False
-                                break
-                            else:
-                                self.recorded_events.append(("key", ev.code, ts))
+                            self.recorded_events.append(("key", ev.code, ts))
+                            
                 except (BlockingIOError, OSError):
                     continue
                         
@@ -178,6 +174,8 @@ class Nahida4479Recorder:
     
     def add_event(self, event_type, data):
         if self.is_recording:
+            if data is None:
+                return
             timestamp = time.time() - self.start_time
             self.recorded_events.append((event_type, data, timestamp))
 
@@ -200,6 +198,7 @@ class Nahida4479Recorder:
             
             self._mouse_track_thread = threading.Thread(target=self._track_mouse_pos, daemon=True)
             self._mouse_track_thread.start()
+            
         else:
             from pynput import mouse, keyboard
             self.m_rec = mouse.Listener(on_click=self.on_click, on_move=self.on_move)
@@ -209,7 +208,15 @@ class Nahida4479Recorder:
         return True
   
     
-    
+    def add_event(self, event_type, data):
+        if self.is_recording:
+            
+            if data in None:
+                return
+            
+        timestamp = time.time() - self.start_time
+        self.recorded_events.append((event_type, data, timestamp))
+        
     def stop_recording(self):
         self.last_action_time = time.time()
         self.is_recording = False
@@ -226,52 +233,30 @@ class Nahida4479Recorder:
             self.show_toast(f"⏹ Saved {len(self.recorded_events)} events", "#7f0000")
 
     def play_recording(self):
-        self.last_action_time = time.time()
-        
         if not self.recorded_events:
-            print("Error: No events to play! Record something first.")
+            print("Error: No events to play!")
             return False
 
         self.is_playing = True
+        if self.on_before_play: self.on_before_play()
         
-        if self.on_before_play:
-            self.on_before_play()
-            
         time.sleep(1)
         
         while self.is_playing:
             last_time = 0
             
             for (event_type, data, timestamp) in self.recorded_events:
-                if not self.is_playing:
-                    break
+                if not self.is_playing: break
                 
                 wait_time = timestamp - last_time
                 if wait_time > 0:
-                    steps = int(wait_time / 0.02)
-                    for _ in range(steps):
-                        if not self.is_playing: 
-                            break
-                        time.sleep(0.02)
-                    if self.is_playing:
-                        time.sleep(wait_time % 0.02)
-
+                    time.sleep(wait_time)
+                
                 last_time = timestamp
-                    
-                    
-                if event_type == "start_pos":
+
+                if event_type == "start_pos" or event_type == "move":
                     self.mouse_controller.position = data
-
-                elif event_type == "move_rel":
-                    code, value = data
-                    if code == 0:
-                        self._rel_x = getattr(self, '_rel_x') + value
-                    elif code == 1:
-                        self._rel_y = getattr(self, '_rel_y', 0) + value
-
-                elif event_type == "move":
-                    self.mouse_controller.position = data
-
+                
                 elif event_type == "click":
                     x, y, button = data
                     self.mouse_controller.position = (x, y)
@@ -279,19 +264,16 @@ class Nahida4479Recorder:
 
                 elif event_type == "key":
                     try:
-                        if not isinstance(data, int):
-                            self.kb_controller.press(data)
-                            self.kb_controller.release(data)
-                    except Exception as ex:
-                        print(f"[KEY ERROR] {ex} – data: {data}")
+                        self.kb_controller.press(data)
+                        self.kb_controller.release(data)
+                    except:
+                        pass
+
             if not self.is_loop_enabled or not self.is_playing:
                 break
 
         self.is_playing = False
-        print("PLAY FINISHED")
-        
-        if self.on_play_finished:
-            self.on_play_finished()
+        if self.on_play_finished: self.on_play_finished()
             
         if self.show_toast:
             self.show_toast("▶ Playback finished!", "#27ae60")
@@ -304,6 +286,7 @@ def on_click(x, y, button, pressed):
         recorder.add_event("click", (x, y, button))
 def on_move(x, y):
     if recorder.is_recording:
+        print(f"DEBUG: Move detected ad {x}, {y}")
         recorder.add_event("move", (x, y))
 def on_press(key):
     if recorder.binding_mode: 
