@@ -46,6 +46,20 @@ class Nahida4479Recorder:
         if SYSTEM == "Linux" and LINUX_EVDEV:
             from evdev import UInput, ecodes
             
+            from evdev import ecodes as ec
+            _keys = (
+                [ec.BTN_LEFT, ec.BTN_RIGHT,
+                ec.KEY_SPACE, ec.KEY_ENTER, ec.KEY_TAB, ec.KEY_BACKSPACE,
+                ec.KEY_ESC, ec.KEY_DELETE, ec.KEY_LEFTSHIFT, ec.KEY_RIGHTSHIFT,
+                ec.KEY_LEFTCTRL, ec.KEY_RIGHTCTRL, ec.KEY_LEFTALT, ec.KEY_RIGHTALT,
+                ec.KEY_UP, ec.KEY_DOWN, ec.KEY_LEFT, ec.KEY_RIGHT,
+                ec.KEY_F1, ec.KEY_F2, ec.KEY_F3, ec.KEY_F4, ec.KEY_F5,
+                ec.KEY_F6, ec.KEY_F7, ec.KEY_F8, ec.KEY_F9, ec.KEY_F10,
+                ec.KEY_F11, ec.KEY_F12] +
+                [getattr(ec, f"KEY_{c.upper()}") for c in "abcdefghijklmnopqrstuvwxyz"] +
+                [getattr(ec, f"KEY_{n}") for n in range(10)]
+)
+            
             cap = {
                 ecodes.EV_KEY: [ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.KEY_F8, ecodes.KEY_F9],
                 ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y]
@@ -109,7 +123,7 @@ class Nahida4479Recorder:
         from evdev import ecodes
         dev_map = {dev.fd: dev for dev in self._evdev_devices}
         
-        control_codes = {62, 64, 66, 67, 88}
+        control_codes = {66, 67, 62, 64, 88}
 
         while self.is_recording:
             r, _, _ = select.select(list(dev_map.keys()), [], [], 0.01)
@@ -174,8 +188,10 @@ class Nahida4479Recorder:
     
     def add_event(self, event_type, data):
         if self.is_recording:
+            
             if data is None:
                 return
+            
             timestamp = time.time() - self.start_time
             self.recorded_events.append((event_type, data, timestamp))
 
@@ -207,15 +223,6 @@ class Nahida4479Recorder:
             self.k_rec.start()
         return True
   
-    
-    def add_event(self, event_type, data):
-        if self.is_recording:
-            
-            if data in None:
-                return
-            
-        timestamp = time.time() - self.start_time
-        self.recorded_events.append((event_type, data, timestamp))
         
     def stop_recording(self):
         self.last_action_time = time.time()
@@ -232,6 +239,47 @@ class Nahida4479Recorder:
         if self.show_toast:
             self.show_toast(f"⏹ Saved {len(self.recorded_events)} events", "#7f0000")
 
+    def _get_evdev_keycode(self,key):
+        if not LINUX_EVDEV:
+            return None
+        from evdev import ecodes
+        from pynput import keyboard as kb
+        mapping = {
+            kb.Key.space:     ecodes.KEY_SPACE,
+            kb.Key.enter:     ecodes.KEY_ENTER,
+            kb.Key.tab:       ecodes.KEY_TAB,
+            kb.Key.backspace: ecodes.KEY_BACKSPACE,
+            kb.Key.esc:       ecodes.KEY_ESC,
+            kb.Key.shift:     ecodes.KEY_LEFTSHIFT,
+            kb.Key.ctrl:      ecodes.KEY_LEFTCTRL,
+            kb.Key.alt:       ecodes.KEY_LEFTALT,
+            kb.Key.up:        ecodes.KEY_UP,
+            kb.Key.down:      ecodes.KEY_DOWN,
+            kb.Key.left:      ecodes.KEY_LEFT,
+            kb.Key.right:     ecodes.KEY_RIGHT,
+            kb.Key.delete:    ecodes.KEY_DELETE,
+            kb.Key.f1:  ecodes.KEY_F1,  kb.Key.f2:  ecodes.KEY_F2,
+            kb.Key.f3:  ecodes.KEY_F3,  kb.Key.f4:  ecodes.KEY_F4,
+            kb.Key.f5:  ecodes.KEY_F5,  kb.Key.f6:  ecodes.KEY_F6,
+            kb.Key.f7:  ecodes.KEY_F7,  kb.Key.f8:  ecodes.KEY_F8,
+            kb.Key.f9:  ecodes.KEY_F9,  kb.Key.f10: ecodes.KEY_F10,
+            kb.Key.f11: ecodes.KEY_F11, kb.Key.f12: ecodes.KEY_F12,
+        }
+        if key in mapping:
+            return mapping[key]
+        char = None
+        if hasattr(key, "char") and key.char:
+            char = key.char
+        elif isinstance(key, str) and len(key) == 1:
+            char = key
+        if char:
+            try:
+                return getattr(ecodes, f"KEY_{char.upper()}")
+            except ArithmeticError:
+                return None
+        return None
+    
+    
     def play_recording(self):
         if not self.recorded_events:
             print("Error: No events to play!")
@@ -254,20 +302,59 @@ class Nahida4479Recorder:
                 
                 last_time = timestamp
 
-                if event_type == "start_pos" or event_type == "move":
-                    self.mouse_controller.position = data
+                if event_type == "start_pos":
+                    self._last_play_pos = data
+                elif event_type == "move":
+                    if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
+                        prev = getattr(self, "_last_play_pos", data)
+                        dx = int(data[0] - prev [0])
+                        dy = int(data[1] - prev[1])
+                        from evdev import ecodes 
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, dx)
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, dy)
+                        self.ui.syn()
+                        self._last_play_pos = data
+                    else:
+                        self.mouse_controller.position = data
                 
                 elif event_type == "click":
                     x, y, button = data
-                    self.mouse_controller.position = (x, y)
-                    self.mouse_controller.click(button)
+                    if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
+                        from evdev import ecodes
+                        prev = getattr(self, "_last_play_pos", (x, y))
+                        dx = int(x - prev[0])
+                        dy = int(y - prev[1])
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, dx)
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, dy)
+                        self.ui.syn()
+                        self._last_play_pos = (x, y)
+                        btn_code = ecodes.BTN_LEFT if button == mouse.Button.left else ecodes.BTN_RIGHT
+                        self.ui.write(ecodes.EV_KEY, btn_code, 0)
+                        time.sleep(0.02)
+                        self.ui.write(ecodes.EV_KEY, btn_code, 0)
+                        self.ui.syn()
+                    else:
+                        self.mouse_controller.position = (x, y)
+                        self.mouse_controller.click(button)
+                        
 
                 elif event_type == "key":
                     try:
-                        self.kb_controller.press(data)
-                        self.kb_controller.release(data)
+                        if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
+                            from evdev import ecodes
+                            key_code = self._get_evdev_keycode(data)
+                            if key_code:
+                                self.ui.write(ecodes.EV_KEY, key_code, 1)
+                                self.ui.syn()
+                                time.sleep(0.02)
+                                self.ui.write(ecodes.EV_KEY, key_code, 0)
+                                self.ui.syn()
+                        else:
+                            self.kb_controller.press(data)
+                            self.kb_controller.release(data)
                     except:
                         pass
+                                
 
             if not self.is_loop_enabled or not self.is_playing:
                 break
