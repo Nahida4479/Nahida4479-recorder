@@ -124,9 +124,8 @@ def open_keybind_window():
                  font=("Segoe UI", 11)).grid(row=i, column=0, padx=20, pady=8, sticky="w")
         
         current = getattr(recorder, attr)
-        # Zamień obiekt Key na czytelny string
         if hasattr(current, 'name'):
-            current_str = current.name  # np. "f4"
+            current_str = current.name
         else:
             current_str = str(current)
         

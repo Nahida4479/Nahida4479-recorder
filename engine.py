@@ -69,16 +69,6 @@ class Nahida4479Recorder:
             threading.Thread(target=self._linux_hotkey_loop, daemon=True).start()
             
             
-    def _track_mouse_pos(self):
-        last_pos = None
-        while self.is_recording:
-            pos = self.mouse_controller.position
-            if pos != last_pos:
-                ts = time.time() - self.start_time
-                self.recorded_events.append(("move", pos, ts))
-                last_pos = pos
-            time.sleep(0.016)
-            
     def _setup_linux_devices(self):
         from evdev import list_devices, InputDevice, ecodes
         for path in list_devices():
@@ -122,25 +112,45 @@ class Nahida4479Recorder:
         import time
         from evdev import ecodes
         dev_map = {dev.fd: dev for dev in self._evdev_devices}
-        
-        control_codes = {66, 67, 62, 64, 88}
+
+        dx_acc = 0
+        dy_acc = 0
+        last_move_ts = 0
 
         while self.is_recording:
             r, _, _ = select.select(list(dev_map.keys()), [], [], 0.01)
-        
+
             for fd in r:
                 dev = dev_map[fd]
                 try:
                     for ev in dev.read():
-                        if not self.is_recording: 
+                        if not self.is_recording:
                             break
                         ts = ev.timestamp() - self.start_time
-                        
-                        if ev.type == ecodes.EV_KEY:
-                            self.recorded_events.append(("key", ev.code, ts))
-                            
+
+                        if ev.type == ecodes.EV_REL:
+                            if ev.code == ecodes.REL_X:
+                                dx_acc += ev.value
+                            elif ev.code == ecodes.REL_Y:
+                                dy_acc += ev.value
+                            last_move_ts = ts
+
+                        elif ev.type == ecodes.EV_KEY:
+                            if ev.code in (ecodes.BTN_LEFT, ecodes.BTN_RIGHT) and ev.value == 1:
+                                button = mouse.Button.left if ev.code == ecodes.BTN_LEFT else mouse.Button.right
+                                self.recorded_events.append(("click", (dx_acc, dy_acc, button), ts))
+                                dx_acc = 0
+                                dy_acc = 0
+                            elif ev.code not in (ecodes.BTN_LEFT, ecodes.BTN_RIGHT):
+                                self.recorded_events.append(("key", ev.code, ts))
+
                 except (BlockingIOError, OSError):
                     continue
+
+            if dx_acc or dy_acc:
+                self.recorded_events.append(("move", (dx_acc, dy_acc), last_move_ts))
+                dx_acc = 0
+                dy_acc = 0
                         
     def play_recording_is_thread(self):
         if not self.recorded_events:
@@ -166,13 +176,17 @@ class Nahida4479Recorder:
             if event_type == "click":
                 x, y, button = event_data
                 data.append({"type": "click", "x": x, "y": y, "button": str(button), "timestamp": timestamp})
+            elif event_type == "move":
+                x, y = event_data
+                data.append({"type": "move", "x": x, "y": y, "timestamp": timestamp})
             elif event_type == "key":
-                data.append({"type": "key", "key": str(event_data), "timestamp": timestamp})
+                key_value = event_data if isinstance(event_data, int) else str(event_data)
+                data.append({"type": "key", "key": key_value, "timestamp": timestamp})
         with open(filepath, "w") as f:
             json.dump(data, f, indent=4)
         print(f"Saved to {filepath}")
-        
-        
+
+
     def load_from_file(self, filepath):
         with open(filepath, "r") as f:
             data = json.load(f)
@@ -181,6 +195,8 @@ class Nahida4479Recorder:
             if item["type"] == "click":
                 btn = mouse.Button.left if "left" in item["button"] else mouse.Button.right
                 self.recorded_events.append(("click", (item["x"], item["y"], btn), item["timestamp"]))
+            elif item["type"] == "move":
+                self.recorded_events.append(("move", (item["x"], item["y"]), item["timestamp"]))
             elif item["type"] == "key":
                 self.recorded_events.append(("key", item["key"], item["timestamp"]))
         print(f"Loaded {len(self.recorded_events)} events from {filepath}")
@@ -211,10 +227,7 @@ class Nahida4479Recorder:
         if SYSTEM == "Linux" and LINUX_EVDEV:
             self.recording_thread = threading.Thread(target=self._linux_record_loop, daemon=True)
             self.recording_thread.start()
-            
-            self._mouse_track_thread = threading.Thread(target=self._track_mouse_pos, daemon=True)
-            self._mouse_track_thread.start()
-            
+
         else:
             from pynput import mouse, keyboard
             self.m_rec = mouse.Listener(on_click=self.on_click, on_move=self.on_move)
@@ -303,46 +316,41 @@ class Nahida4479Recorder:
                 last_time = timestamp
 
                 if event_type == "start_pos":
-                    self._last_play_pos = data
+                    pass
                 elif event_type == "move":
                     if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
-                        prev = getattr(self, "_last_play_pos", data)
-                        dx = int(data[0] - prev [0])
-                        dy = int(data[1] - prev[1])
-                        from evdev import ecodes 
-                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, dx)
-                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, dy)
+                        dx, dy = data
+                        from evdev import ecodes
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, int(dx))
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, int(dy))
                         self.ui.syn()
-                        self._last_play_pos = data
                     else:
                         self.mouse_controller.position = data
-                
+
                 elif event_type == "click":
-                    x, y, button = data
                     if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
+                        dx, dy, button = data
                         from evdev import ecodes
-                        prev = getattr(self, "_last_play_pos", (x, y))
-                        dx = int(x - prev[0])
-                        dy = int(y - prev[1])
-                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, dx)
-                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, dy)
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, int(dx))
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, int(dy))
                         self.ui.syn()
-                        self._last_play_pos = (x, y)
                         btn_code = ecodes.BTN_LEFT if button == mouse.Button.left else ecodes.BTN_RIGHT
-                        self.ui.write(ecodes.EV_KEY, btn_code, 0)
+                        self.ui.write(ecodes.EV_KEY, btn_code, 1)
+                        self.ui.syn()
                         time.sleep(0.02)
                         self.ui.write(ecodes.EV_KEY, btn_code, 0)
                         self.ui.syn()
                     else:
+                        x, y, button = data
                         self.mouse_controller.position = (x, y)
                         self.mouse_controller.click(button)
-                        
+
 
                 elif event_type == "key":
                     try:
                         if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
                             from evdev import ecodes
-                            key_code = self._get_evdev_keycode(data)
+                            key_code = data if isinstance(data, int) else self._get_evdev_keycode(data)
                             if key_code:
                                 self.ui.write(ecodes.EV_KEY, key_code, 1)
                                 self.ui.syn()
