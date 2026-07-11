@@ -321,20 +321,17 @@ class Nahida4479Recorder:
                 if event_type == "start_pos":
                     if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
                         from evdev import ecodes
-                        dx = int(data[0] - self._virtual_x)
-                        dy = int(data[1] - self._virtual_y)
-                        step = 5
-                        while (dx or dy) and self.is_playing:
-                            sx = max(-step, min(step, dx))
-                            sy = max(-step, min(step, dy))
-                            self.ui.write(ecodes.EV_REL, ecodes.REL_X, sx)
-                            self.ui.write(ecodes.EV_REL, ecodes.REL_Y, sy)
-                            self.ui.syn()
-                            self._virtual_x += sx
-                            self._virtual_y += sy
-                            dx -= sx
-                            dy -= sy
-                            time.sleep(0.004)
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, -100000)
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, -100000)
+                        self.ui.syn()
+                        self._virtual_x = 0
+                        self._virtual_y = 0
+                        time.sleep(0.05)
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, int(data[0]))
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, int(data[1]))
+                        self.ui.syn()
+                        self._virtual_x += int(data[0])
+                        self._virtual_y += int(data[1])
                         play_clock = time.monotonic() - timestamp
                     else:
                         self.mouse_controller.position = data
