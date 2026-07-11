@@ -44,34 +44,22 @@ class Nahida4479Recorder:
         
         self.ui = None
         if SYSTEM == "Linux" and LINUX_EVDEV:
-            from evdev import UInput, ecodes, AbsInfo
-
-            screen_w, screen_h = self._detect_screen_size()
+            from evdev import UInput, ecodes
 
             cap = {
                 ecodes.EV_KEY: [ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.KEY_F8, ecodes.KEY_F9],
                 ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y],
-                ecodes.EV_ABS: [
-                    (ecodes.ABS_X, AbsInfo(value=0, min=0, max=screen_w, fuzz=0, flat=0, resolution=0)),
-                    (ecodes.ABS_Y, AbsInfo(value=0, min=0, max=screen_h, fuzz=0, flat=0, resolution=0)),
-                ],
             }
             self.ui = UInput(cap, name="Nahida-Virtual-Mouse", version=0x3)
             self._setup_linux_devices()
             threading.Thread(target=self._linux_hotkey_loop, daemon=True).start()
 
 
-    def _detect_screen_size(self):
-        try:
-            import tkinter
-            root = tkinter.Tk()
-            root.withdraw()
-            w = root.winfo_screenwidth()
-            h = root.winfo_screenheight()
-            root.destroy()
-            return w, h
-        except Exception:
-            return 1920, 1080
+    def _warp_to_origin(self):
+        from evdev import ecodes
+        self.ui.write(ecodes.EV_REL, ecodes.REL_X, -100000)
+        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, -100000)
+        self.ui.syn()
 
     def _setup_linux_devices(self):
         from evdev import list_devices, InputDevice, ecodes
@@ -213,11 +201,13 @@ class Nahida4479Recorder:
         self.recorded_events = []
         self.is_recording = True
         self.start_time = time.time()
-        
-        start_pos = self.mouse_controller.position
-        self.recorded_events.append(("start_pos", start_pos, 0))
-        
-        
+
+        if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
+            self._warp_to_origin()
+        else:
+            start_pos = self.mouse_controller.position
+            self.recorded_events.append(("start_pos", start_pos, 0))
+
         if self.show_toast:
             self.show_toast("⏺ Recording started!", "#c0392b")
             
@@ -299,24 +289,21 @@ class Nahida4479Recorder:
         
         while self.is_playing:
             last_time = 0
-            
+
+            if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
+                self._warp_to_origin()
+
             for (event_type, data, timestamp) in self.recorded_events:
                 if not self.is_playing: break
-                
+
                 wait_time = timestamp - last_time
                 if wait_time > 0:
                     time.sleep(wait_time)
-                
+
                 last_time = timestamp
 
                 if event_type == "start_pos":
-                    if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
-                        x, y = data
-                        from evdev import ecodes
-                        self.ui.write(ecodes.EV_ABS, ecodes.ABS_X, int(x))
-                        self.ui.write(ecodes.EV_ABS, ecodes.ABS_Y, int(y))
-                        self.ui.syn()
-                    else:
+                    if not (SYSTEM == "Linux" and LINUX_EVDEV and self.ui):
                         self.mouse_controller.position = data
                 elif event_type == "move":
                     if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
