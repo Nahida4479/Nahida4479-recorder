@@ -41,7 +41,9 @@ class Nahida4479Recorder:
         self.binding_mode = False
         
         self._evdev_devices = []
-        
+        self._virtual_x = 0
+        self._virtual_y = 0
+
         self.ui = None
         if SYSTEM == "Linux" and LINUX_EVDEV:
             from evdev import UInput, ecodes
@@ -52,6 +54,13 @@ class Nahida4479Recorder:
             }
             self.ui = UInput(cap, name="Nahida-Virtual-Mouse", version=0x3)
             self._setup_linux_devices()
+
+            self.ui.write(ecodes.EV_REL, ecodes.REL_X, -100000)
+            self.ui.write(ecodes.EV_REL, ecodes.REL_Y, -100000)
+            self.ui.syn()
+            self._virtual_x = 0
+            self._virtual_y = 0
+
             threading.Thread(target=self._linux_hotkey_loop, daemon=True).start()
 
 
@@ -60,8 +69,11 @@ class Nahida4479Recorder:
         for path in list_devices():
             try:
                 dev = InputDevice(path)
-                
-                if any(cap in dev.capabilities() for cap in [ecodes.EV_KEY, ecodes.EV_REL]):       
+
+                if dev.name == "Nahida-Virtual-Mouse":
+                    continue
+
+                if any(cap in dev.capabilities() for cap in [ecodes.EV_KEY, ecodes.EV_REL]):
                     self._evdev_devices.append(dev)
             except (PermissionError, OSError):
                 continue
@@ -87,6 +99,19 @@ class Nahida4479Recorder:
                 dev = dev_map[fd]
                 try:
                     for ev in dev.read():
+                        if ev.type == ecodes.EV_REL:
+                            if ev.code == ecodes.REL_X:
+                                self._virtual_x += ev.value
+                                if self.is_recording:
+                                    dx_acc += ev.value
+                            elif ev.code == ecodes.REL_Y:
+                                self._virtual_y += ev.value
+                                if self.is_recording:
+                                    dy_acc += ev.value
+                            if self.is_recording:
+                                last_move_ts = ev.timestamp() - self.start_time
+                            continue
+
                         if ev.type == ecodes.EV_KEY and ev.code in hotkey_codes:
                             if ev.value == 1:
                                 if ev.code == ecodes.KEY_F8:
@@ -107,14 +132,7 @@ class Nahida4479Recorder:
 
                         ts = ev.timestamp() - self.start_time
 
-                        if ev.type == ecodes.EV_REL:
-                            if ev.code == ecodes.REL_X:
-                                dx_acc += ev.value
-                            elif ev.code == ecodes.REL_Y:
-                                dy_acc += ev.value
-                            last_move_ts = ts
-
-                        elif ev.type == ecodes.EV_KEY:
+                        if ev.type == ecodes.EV_KEY:
                             if ev.code in (ecodes.BTN_LEFT, ecodes.BTN_RIGHT) and ev.value == 1:
                                 button = mouse.Button.left if ev.code == ecodes.BTN_LEFT else mouse.Button.right
                                 self.recorded_events.append(("click", (dx_acc, dy_acc, button), ts))
@@ -126,8 +144,9 @@ class Nahida4479Recorder:
                 except (BlockingIOError, OSError):
                     continue
 
-            if self.is_recording and (dx_acc or dy_acc):
-                self.recorded_events.append(("move", (dx_acc, dy_acc), last_move_ts))
+            if dx_acc or dy_acc:
+                if self.is_recording:
+                    self.recorded_events.append(("move", (dx_acc, dy_acc), last_move_ts))
                 dx_acc = 0
                 dy_acc = 0
 
@@ -196,7 +215,10 @@ class Nahida4479Recorder:
         self.is_recording = True
         self.start_time = time.time()
 
-        start_pos = self.mouse_controller.position
+        if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
+            start_pos = (self._virtual_x, self._virtual_y)
+        else:
+            start_pos = self.mouse_controller.position
         self.recorded_events.append(("start_pos", start_pos, 0))
 
         if self.show_toast:
@@ -292,13 +314,14 @@ class Nahida4479Recorder:
 
                 if event_type == "start_pos":
                     if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
-                        current_pos = self.mouse_controller.position
-                        dx = int(data[0] - current_pos[0])
-                        dy = int(data[1] - current_pos[1])
+                        dx = int(data[0] - self._virtual_x)
+                        dy = int(data[1] - self._virtual_y)
                         from evdev import ecodes
                         self.ui.write(ecodes.EV_REL, ecodes.REL_X, dx)
                         self.ui.write(ecodes.EV_REL, ecodes.REL_Y, dy)
                         self.ui.syn()
+                        self._virtual_x += dx
+                        self._virtual_y += dy
                     else:
                         self.mouse_controller.position = data
                 elif event_type == "move":
@@ -308,6 +331,8 @@ class Nahida4479Recorder:
                         self.ui.write(ecodes.EV_REL, ecodes.REL_X, int(dx))
                         self.ui.write(ecodes.EV_REL, ecodes.REL_Y, int(dy))
                         self.ui.syn()
+                        self._virtual_x += dx
+                        self._virtual_y += dy
                     else:
                         self.mouse_controller.position = data
 
@@ -318,6 +343,8 @@ class Nahida4479Recorder:
                         self.ui.write(ecodes.EV_REL, ecodes.REL_X, int(dx))
                         self.ui.write(ecodes.EV_REL, ecodes.REL_Y, int(dy))
                         self.ui.syn()
+                        self._virtual_x += dx
+                        self._virtual_y += dy
                         btn_code = ecodes.BTN_LEFT if button == mouse.Button.left else ecodes.BTN_RIGHT
                         self.ui.write(ecodes.EV_KEY, btn_code, 1)
                         self.ui.syn()
