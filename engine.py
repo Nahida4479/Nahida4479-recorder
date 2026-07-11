@@ -55,12 +55,6 @@ class Nahida4479Recorder:
             threading.Thread(target=self._linux_hotkey_loop, daemon=True).start()
 
 
-    def _warp_to_origin(self):
-        from evdev import ecodes
-        self.ui.write(ecodes.EV_REL, ecodes.REL_X, -100000)
-        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, -100000)
-        self.ui.syn()
-
     def _setup_linux_devices(self):
         from evdev import list_devices, InputDevice, ecodes
         for path in list_devices():
@@ -202,11 +196,8 @@ class Nahida4479Recorder:
         self.is_recording = True
         self.start_time = time.time()
 
-        if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
-            self._warp_to_origin()
-        else:
-            start_pos = self.mouse_controller.position
-            self.recorded_events.append(("start_pos", start_pos, 0))
+        start_pos = self.mouse_controller.position
+        self.recorded_events.append(("start_pos", start_pos, 0))
 
         if self.show_toast:
             self.show_toast("⏺ Recording started!", "#c0392b")
@@ -290,9 +281,6 @@ class Nahida4479Recorder:
         while self.is_playing:
             last_time = 0
 
-            if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
-                self._warp_to_origin()
-
             for (event_type, data, timestamp) in self.recorded_events:
                 if not self.is_playing: break
 
@@ -303,7 +291,15 @@ class Nahida4479Recorder:
                 last_time = timestamp
 
                 if event_type == "start_pos":
-                    if not (SYSTEM == "Linux" and LINUX_EVDEV and self.ui):
+                    if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
+                        current_pos = self.mouse_controller.position
+                        dx = int(data[0] - current_pos[0])
+                        dy = int(data[1] - current_pos[1])
+                        from evdev import ecodes
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, dx)
+                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, dy)
+                        self.ui.syn()
+                    else:
                         self.mouse_controller.position = data
                 elif event_type == "move":
                     if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
