@@ -99,6 +99,14 @@ class Nahida4479Recorder:
                 dev = dev_map[fd]
                 try:
                     for ev in dev.read():
+                        if ev.type == ecodes.EV_SYN and ev.code == ecodes.SYN_REPORT:
+                            if dx_acc or dy_acc:
+                                if self.is_recording:
+                                    self.recorded_events.append(("move", (dx_acc, dy_acc), last_move_ts))
+                                dx_acc = 0
+                                dy_acc = 0
+                            continue
+
                         if ev.type == ecodes.EV_REL:
                             if ev.code == ecodes.REL_X:
                                 self._virtual_x += ev.value
