@@ -44,31 +44,35 @@ class Nahida4479Recorder:
         
         self.ui = None
         if SYSTEM == "Linux" and LINUX_EVDEV:
-            from evdev import UInput, ecodes
-            
-            from evdev import ecodes as ec
-            _keys = (
-                [ec.BTN_LEFT, ec.BTN_RIGHT,
-                ec.KEY_SPACE, ec.KEY_ENTER, ec.KEY_TAB, ec.KEY_BACKSPACE,
-                ec.KEY_ESC, ec.KEY_DELETE, ec.KEY_LEFTSHIFT, ec.KEY_RIGHTSHIFT,
-                ec.KEY_LEFTCTRL, ec.KEY_RIGHTCTRL, ec.KEY_LEFTALT, ec.KEY_RIGHTALT,
-                ec.KEY_UP, ec.KEY_DOWN, ec.KEY_LEFT, ec.KEY_RIGHT,
-                ec.KEY_F1, ec.KEY_F2, ec.KEY_F3, ec.KEY_F4, ec.KEY_F5,
-                ec.KEY_F6, ec.KEY_F7, ec.KEY_F8, ec.KEY_F9, ec.KEY_F10,
-                ec.KEY_F11, ec.KEY_F12] +
-                [getattr(ec, f"KEY_{c.upper()}") for c in "abcdefghijklmnopqrstuvwxyz"] +
-                [getattr(ec, f"KEY_{n}") for n in range(10)]
-)
-            
+            from evdev import UInput, ecodes, AbsInfo
+
+            screen_w, screen_h = self._detect_screen_size()
+
             cap = {
                 ecodes.EV_KEY: [ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.KEY_F8, ecodes.KEY_F9],
-                ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y]
+                ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y],
+                ecodes.EV_ABS: [
+                    (ecodes.ABS_X, AbsInfo(value=0, min=0, max=screen_w, fuzz=0, flat=0, resolution=0)),
+                    (ecodes.ABS_Y, AbsInfo(value=0, min=0, max=screen_h, fuzz=0, flat=0, resolution=0)),
+                ],
             }
             self.ui = UInput(cap, name="Nahida-Virtual-Mouse", version=0x3)
             self._setup_linux_devices()
             threading.Thread(target=self._linux_hotkey_loop, daemon=True).start()
-            
-            
+
+
+    def _detect_screen_size(self):
+        try:
+            import tkinter
+            root = tkinter.Tk()
+            root.withdraw()
+            w = root.winfo_screenwidth()
+            h = root.winfo_screenheight()
+            root.destroy()
+            return w, h
+        except Exception:
+            return 1920, 1080
+
     def _setup_linux_devices(self):
         from evdev import list_devices, InputDevice, ecodes
         for path in list_devices():
@@ -84,48 +88,41 @@ class Nahida4479Recorder:
         import select
         from evdev import ecodes
         dev_map = {dev.fd: dev for dev in self._evdev_devices}
-        
-        while True:
-            r, _, _ = select.select(list(dev_map.keys()), [], [])
-            for fd in r:
-                try:
-                    for ev in dev_map[fd].read():
-                        if ev.type == ecodes.EV_KEY and ev.value == 1: 
-                            key_name = ecodes.KEY.get(ev.code, "UNKNOWN")
 
-                            if key_name == "KEY_F8":
-                                self.start_recording()
-                            elif key_name == "KEY_F9":
-                                self.stop_recording()
-                            elif key_name == "KEY_F6":
-                                print("[DEBUG] F6 Pressed - Stopping Playback")
-                                self.is_playing = False
-                            elif key_name == "KEY_F4":
-                                self.play_recording_is_thread()
-                            elif key_name == "KEY_F12":
-                                os._exit(0)
-                except (BlockingIOError, OSError):
-                    continue
-                                   
-    def _linux_record_loop(self):
-        import select
-        import time
-        from evdev import ecodes
-        dev_map = {dev.fd: dev for dev in self._evdev_devices}
+        hotkey_codes = {
+            ecodes.KEY_F8, ecodes.KEY_F9, ecodes.KEY_F6,
+            ecodes.KEY_F4, ecodes.KEY_F12,
+        }
 
         dx_acc = 0
         dy_acc = 0
         last_move_ts = 0
 
-        while self.is_recording:
+        while True:
             r, _, _ = select.select(list(dev_map.keys()), [], [], 0.01)
 
             for fd in r:
                 dev = dev_map[fd]
                 try:
                     for ev in dev.read():
+                        if ev.type == ecodes.EV_KEY and ev.code in hotkey_codes:
+                            if ev.value == 1:
+                                if ev.code == ecodes.KEY_F8:
+                                    self.start_recording()
+                                elif ev.code == ecodes.KEY_F9:
+                                    self.stop_recording()
+                                elif ev.code == ecodes.KEY_F6:
+                                    print("[DEBUG] F6 Pressed - Stopping Playback")
+                                    self.is_playing = False
+                                elif ev.code == ecodes.KEY_F4:
+                                    self.play_recording_is_thread()
+                                elif ev.code == ecodes.KEY_F12:
+                                    os._exit(0)
+                            continue
+
                         if not self.is_recording:
-                            break
+                            continue
+
                         ts = ev.timestamp() - self.start_time
 
                         if ev.type == ecodes.EV_REL:
@@ -147,11 +144,12 @@ class Nahida4479Recorder:
                 except (BlockingIOError, OSError):
                     continue
 
-            if dx_acc or dy_acc:
+            if self.is_recording and (dx_acc or dy_acc):
                 self.recorded_events.append(("move", (dx_acc, dy_acc), last_move_ts))
                 dx_acc = 0
                 dy_acc = 0
-                        
+
+
     def play_recording_is_thread(self):
         if not self.recorded_events:
             print("ERROR: No events recorded! Cannot play.")
@@ -224,11 +222,7 @@ class Nahida4479Recorder:
             self.show_toast("⏺ Recording started!", "#c0392b")
             
             
-        if SYSTEM == "Linux" and LINUX_EVDEV:
-            self.recording_thread = threading.Thread(target=self._linux_record_loop, daemon=True)
-            self.recording_thread.start()
-
-        else:
+        if not (SYSTEM == "Linux" and LINUX_EVDEV):
             from pynput import mouse, keyboard
             self.m_rec = mouse.Listener(on_click=self.on_click, on_move=self.on_move)
             self.k_rec = keyboard.Listener(on_press=self.on_k_press, on_release=self.on_k_release)
@@ -316,7 +310,14 @@ class Nahida4479Recorder:
                 last_time = timestamp
 
                 if event_type == "start_pos":
-                    pass
+                    if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
+                        x, y = data
+                        from evdev import ecodes
+                        self.ui.write(ecodes.EV_ABS, ecodes.ABS_X, int(x))
+                        self.ui.write(ecodes.EV_ABS, ecodes.ABS_Y, int(y))
+                        self.ui.syn()
+                    else:
+                        self.mouse_controller.position = data
                 elif event_type == "move":
                     if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
                         dx, dy = data
