@@ -55,12 +55,6 @@ class Nahida4479Recorder:
             self.ui = UInput(cap, name="Nahida-Virtual-Mouse", version=0x3)
             self._setup_linux_devices()
 
-            self.ui.write(ecodes.EV_REL, ecodes.REL_X, -100000)
-            self.ui.write(ecodes.EV_REL, ecodes.REL_Y, -100000)
-            self.ui.syn()
-            self._virtual_x = 0
-            self._virtual_y = 0
-
             threading.Thread(target=self._linux_hotkey_loop, daemon=True).start()
 
 
@@ -319,21 +313,7 @@ class Nahida4479Recorder:
                     time.sleep(wait_time)
 
                 if event_type == "start_pos":
-                    if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
-                        from evdev import ecodes
-                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, -100000)
-                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, -100000)
-                        self.ui.syn()
-                        self._virtual_x = 0
-                        self._virtual_y = 0
-                        time.sleep(0.05)
-                        self.ui.write(ecodes.EV_REL, ecodes.REL_X, int(data[0]))
-                        self.ui.write(ecodes.EV_REL, ecodes.REL_Y, int(data[1]))
-                        self.ui.syn()
-                        self._virtual_x += int(data[0])
-                        self._virtual_y += int(data[1])
-                        play_clock = time.monotonic() - timestamp
-                    else:
+                    if not (SYSTEM == "Linux" and LINUX_EVDEV and self.ui):
                         self.mouse_controller.position = data
                 elif event_type == "move":
                     if SYSTEM == "Linux" and LINUX_EVDEV and self.ui:
